@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"async"
+	"github.com/b97tsk/async"
 )
 
 // This example demonstrates how to create async Tasks with different paths.
