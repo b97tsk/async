@@ -1,41 +1,41 @@
 package async
 
-// Event is the interface of any type that can be watched by a [Task].
+// Event is the interface of any type that can be watched by a [Coroutine].
 //
 // The following types implement Event: [Signal], [State] and [Memo].
 type Event interface {
-	addListener(t *Task)
-	removeListener(t *Task)
+	addListener(co *Coroutine)
+	removeListener(co *Coroutine)
 }
 
 // Signal is a type that implements [Event].
 //
 // Calling the Notify method of a Signal, in an [Operation] function, resumes
-// any [Task] that is watching the Signal.
+// any [Coroutine] that is watching the Signal.
 //
 // A Signal must not be shared by more than one [Executor].
 type Signal struct {
-	listeners map[*Task]struct{}
+	listeners map[*Coroutine]struct{}
 }
 
-func (s *Signal) addListener(t *Task) {
+func (s *Signal) addListener(co *Coroutine) {
 	listeners := s.listeners
 	if listeners == nil {
-		listeners = make(map[*Task]struct{})
+		listeners = make(map[*Coroutine]struct{})
 		s.listeners = listeners
 	}
-	listeners[t] = struct{}{}
+	listeners[co] = struct{}{}
 }
 
-func (s *Signal) removeListener(t *Task) {
-	delete(s.listeners, t)
+func (s *Signal) removeListener(co *Coroutine) {
+	delete(s.listeners, co)
 }
 
-// Notify resumes any [Task] that is watching s.
+// Notify resumes any [Coroutine] that is watching s.
 //
 // One should only call this method in an [Operation] function.
 func (s *Signal) Notify() {
-	for t := range s.listeners {
-		t.wake()
+	for co := range s.listeners {
+		co.resume()
 	}
 }

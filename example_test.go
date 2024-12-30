@@ -8,16 +8,16 @@ import (
 	"github.com/b97tsk/async"
 )
 
-// This example demonstrates how to create async Tasks with different paths.
+// This example demonstrates how to spawn Coroutines with different paths.
 // The lower path, the higher priority.
-// This example creates a Task with path "aa" for additional computations
-// and another Task with path "zz" for printing results.
+// This example creates a Coroutine with path "aa" for additional computations
+// and another Coroutine with path "zz" for printing results.
 // The former runs before the latter because "aa" < "zz".
 func Example() {
 	// Create an Executor.
 	var myExecutor async.Executor
 
-	// Set up an autorun function to run an Executor automatically whenever a Task is spawned or resumed.
+	// Set up an autorun function to run an Executor automatically whenever a Coroutine is spawned or resumed.
 	// The best practice is to pass a function that does not block. See Example (NonBlocking).
 	myExecutor.Autorun(myExecutor.Run)
 
@@ -26,51 +26,51 @@ func Example() {
 
 	// Although States can be created without the help of Executors,
 	// they might only be safe for use by one and only one Executor because of data races.
-	// Without proper synchronization, it's better only to spawn Tasks to read or update States.
+	// Without proper synchronization, it's better only to spawn Coroutines to read or update States.
 
 	var sum, product async.State[int]
 
-	myExecutor.Spawn("aa", func(t *async.Task) async.Result { // The path of t is "aa".
-		t.Watch(s1, s2) // Let t depend on s1 and s2, so t can re-run whenever s1 or s2 changes.
+	myExecutor.Spawn("aa", func(co *async.Coroutine) async.Result { // The path of co is "aa".
+		co.Watch(s1, s2) // Let co depend on s1 and s2, so co can re-run whenever s1 or s2 changes.
 		sum.Set(s1.Get() + s2.Get())
 		product.Set(s1.Get() * s2.Get())
-		return t.Await() // Awaits signals or state changes.
+		return co.Await() // Awaits signals or state changes.
 	})
 
-	// The above Task re-runs whenever s1 or s2 changes. As an example, this is fine.
+	// The above Coroutine re-runs whenever s1 or s2 changes. As an example, this is fine.
 	// In practice, one should probably use Memos to avoid unnecessary recomputations. See Example (Memo).
 
 	op := async.NewState('+')
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result { // The path of t is "zz".
-		t.Watch(op)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result { // The path of co is "zz".
+		co.Watch(op)
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			// The path of an inner Task is relative to its outer one.
-			t.Spawn("sum", func(t *async.Task) async.Result { // The path of inner t is "zz/sum".
+			// The path of an inner Coroutine is relative to its outer one.
+			co.Spawn("sum", func(co *async.Coroutine) async.Result { // The path of inner co is "zz/sum".
 				fmt.Println("s1 + s2 =", sum.Get())
-				return t.Await(&sum)
+				return co.Await(&sum)
 			})
 		case '*':
-			t.Spawn("product", func(t *async.Task) async.Result { // The path of inner t is "zz/product".
+			co.Spawn("product", func(co *async.Coroutine) async.Result { // The path of inner co is "zz/product".
 				fmt.Println("s1 * s2 =", product.Get())
-				return t.Await(&product)
+				return co.Await(&product)
 			})
 		}
 
-		return t.Await()
+		return co.Await()
 	})
 
 	fmt.Println("--- SEPARATOR ---")
 
-	// The followings create several Tasks to mutate States.
+	// The followings create several Coroutines to mutate States.
 	// They share the same path, "/", which is lower than "aa" and "zz".
 	// Remember that, the lower path, the higher priority.
-	// Updating States should have higher priority, so that when there are multiple update Tasks,
-	// they can run together before any read Task.
+	// Updating States should have higher priority, so that when there are multiple update Coroutines,
+	// they can run together before any read Coroutine.
 	// This reduces the number of reads that have to react on update.
 
 	myExecutor.Spawn("/", async.Do(func() {
@@ -123,15 +123,15 @@ func Example_memo() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, "aa", func(t *async.Task, s *async.State[int]) {
-		t.Watch(s1, s2)
+	sum := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v) // Update s only when its value changes to stop unnecessary propagation.
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, "aa", func(t *async.Task, s *async.State[int]) {
-		t.Watch(s1, s2)
+	product := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
 		}
@@ -139,25 +139,25 @@ func Example_memo() {
 
 	op := async.NewState('+')
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(op)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(op)
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			t.Spawn("sum", func(t *async.Task) async.Result {
+			co.Spawn("sum", func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
-				return t.Await(sum)
+				return co.Await(sum)
 			})
 		case '*':
-			t.Spawn("product", func(t *async.Task) async.Result {
+			co.Spawn("product", func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
-				return t.Await(product)
+				return co.Await(product)
 			})
 		}
 
-		return t.Await()
+		return co.Await()
 	})
 
 	fmt.Println("--- SEPARATOR ---")
@@ -204,7 +204,7 @@ func Example_memo() {
 }
 
 // This example demonstrates how to set up an autorun function to run
-// an Executor in a goroutine automatically whenever a Task is spawned or
+// an Executor in a goroutine automatically whenever a Coroutine is spawned or
 // resumed.
 func Example_nonBlocking() {
 	var wg sync.WaitGroup // For keeping track of goroutines.
@@ -221,15 +221,15 @@ func Example_nonBlocking() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, "aa", func(t *async.Task, s *async.State[int]) {
-		t.Watch(s1, s2)
+	sum := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v)
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, "aa", func(t *async.Task, s *async.State[int]) {
-		t.Watch(s1, s2)
+	product := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
 		}
@@ -237,25 +237,25 @@ func Example_nonBlocking() {
 
 	op := async.NewState('+')
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(op)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(op)
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			t.Spawn("sum", func(t *async.Task) async.Result {
+			co.Spawn("sum", func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
-				return t.Await(sum)
+				return co.Await(sum)
 			})
 		case '*':
-			t.Spawn("product", func(t *async.Task) async.Result {
+			co.Spawn("product", func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
-				return t.Await(product)
+				return co.Await(product)
 			})
 		}
 
-		return t.Await()
+		return co.Await()
 	})
 
 	wg.Wait() // Wait for autorun to complete.
@@ -307,7 +307,8 @@ func Example_nonBlocking() {
 	// s1 + s2 = 15
 }
 
-// This example demonstrates how a Task can conditionally depend on a State.
+// This example demonstrates how a Coroutine can conditionally depend on
+// a State.
 func Example_conditional() {
 	var myExecutor async.Executor
 
@@ -315,17 +316,17 @@ func Example_conditional() {
 
 	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
 
-	myExecutor.Spawn("aa", func(t *async.Task) async.Result {
-		t.Watch(s1, s2) // Always depends on s1 and s2.
+	myExecutor.Spawn("aa", func(co *async.Coroutine) async.Result {
+		co.Watch(s1, s2) // Always depends on s1 and s2.
 
 		v := s1.Get() + s2.Get()
 		if v%2 == 0 {
-			t.Watch(s3) // Conditionally depends on s3.
+			co.Watch(s3) // Conditionally depends on s3.
 			v *= s3.Get()
 		}
 
 		fmt.Println(v)
-		return t.Await()
+		return co.Await()
 	})
 
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
@@ -349,22 +350,22 @@ func Example_conditionalMemo() {
 
 	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
 
-	m := async.NewMemo(&myExecutor, "aa", func(t *async.Task, s *async.State[int]) {
-		t.Watch(s1, s2) // Always depends on s1 and s2.
+	m := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+		co.Watch(s1, s2) // Always depends on s1 and s2.
 
 		v := s1.Get() + s2.Get()
 		if v%2 == 0 {
-			t.Watch(s3) // Conditionally depends on s3.
+			co.Watch(s3) // Conditionally depends on s3.
 			v *= s3.Get()
 		}
 
 		s.Set(v)
 	})
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(m)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(m)
 		fmt.Println(m.Get())
-		return t.Await()
+		return co.Await()
 	})
 
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
@@ -380,9 +381,9 @@ func Example_conditionalMemo() {
 	// 5
 }
 
-// This example demonstrates how to end a Task.
-// It creates a Task that prints the value of a State whenever it changes.
-// The Task only prints 0, 1, 2 and 3 because it is ended after 3.
+// This example demonstrates how to end a Coroutine.
+// It creates a Coroutine that prints the value of a State whenever it changes.
+// The Coroutine only prints 0, 1, 2 and 3 because it is ended after 3.
 func Example_end() {
 	var myExecutor async.Executor
 
@@ -390,17 +391,17 @@ func Example_end() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(&myState)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(&myState)
 
 		v := myState.Get()
 		fmt.Println(v)
 
 		if v < 3 {
-			return t.Await()
+			return co.Await()
 		}
 
-		return t.End()
+		return co.End()
 	})
 
 	for i := 1; i <= 5; i++ {
@@ -417,8 +418,8 @@ func Example_end() {
 	// 5
 }
 
-// This example demonstrates how to add a function call before a Task
-// re-runs, or after a Task ends.
+// This example demonstrates how to add a function call before a Coroutine
+// re-runs, or after a Coroutine ends.
 func Example_defer() {
 	var myExecutor async.Executor
 
@@ -426,17 +427,17 @@ func Example_defer() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(&myState)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(&myState)
 
 		v := myState.Get()
-		t.Defer(func() { fmt.Println(v, myState.Get()) })
+		co.Defer(func() { fmt.Println(v, myState.Get()) })
 
 		if v < 3 {
-			return t.Await()
+			return co.Await()
 		}
 
-		return t.End()
+		return co.End()
 	})
 
 	for i := 1; i <= 5; i++ {
@@ -453,7 +454,7 @@ func Example_defer() {
 	// 5
 }
 
-// This example demonstrates how a Task can switch from one Operation to
+// This example demonstrates how a Coroutine can switch from one Operation to
 // another.
 func Example_switch() {
 	var myExecutor async.Executor
@@ -462,27 +463,27 @@ func Example_switch() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(t *async.Task) async.Result {
-		t.Watch(&myState)
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		co.Watch(&myState)
 
 		v := myState.Get()
 		fmt.Println(v)
 
 		if v < 3 {
-			return t.Await()
+			return co.Await()
 		}
 
-		return t.Switch(func(t *async.Task) async.Result {
-			t.Watch(&myState)
+		return co.Switch(func(co *async.Coroutine) async.Result {
+			co.Watch(&myState)
 
 			v := myState.Get()
 			fmt.Println(v, "(switched)")
 
 			if v < 5 {
-				return t.Await()
+				return co.Await()
 			}
 
-			return t.End()
+			return co.End()
 		})
 	})
 
@@ -504,7 +505,7 @@ func Example_switch() {
 }
 
 // This example demonstrates how to chain multiple Operations together to be
-// worked on in sequence by a Task.
+// worked on in sequence by a Coroutine.
 func Example_chain() {
 	var myExecutor async.Executor
 
@@ -513,40 +514,40 @@ func Example_chain() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Chain(
-		func(t *async.Task) async.Result {
-			t.Watch(&myState)
+		func(co *async.Coroutine) async.Result {
+			co.Watch(&myState)
 
 			v := myState.Get()
 			fmt.Println(v, "(first)")
 
 			if v < 3 {
-				return t.Await()
+				return co.Await()
 			}
 
-			return t.Switch(func(t *async.Task) async.Result {
-				t.Watch(&myState)
+			return co.Switch(func(co *async.Coroutine) async.Result {
+				co.Watch(&myState)
 
 				v := myState.Get()
 				fmt.Println(v, "(switched)")
 
 				if v < 5 {
-					return t.Await()
+					return co.Await()
 				}
 
-				return t.End()
+				return co.End()
 			})
 		},
-		func(t *async.Task) async.Result {
-			t.Watch(&myState)
+		func(co *async.Coroutine) async.Result {
+			co.Watch(&myState)
 
 			v := myState.Get()
 			fmt.Println(v, "(second)")
 
 			if v < 7 {
-				return t.Await()
+				return co.Await()
 			}
 
-			return t.End()
+			return co.End()
 		},
 	))
 
@@ -570,7 +571,7 @@ func Example_chain() {
 	// 9
 }
 
-// This example demonstrates how to yield a Task only for it to resume
+// This example demonstrates how to yield a Coroutine only for it to resume
 // later with another Operation.
 // It computes two values in separate goroutines sequentially, then prints
 // their sum.
@@ -593,7 +594,7 @@ func Example_yield() {
 		v1, v2 int
 	}
 
-	myExecutor.Spawn("/", func(t *async.Task) async.Result {
+	myExecutor.Spawn("/", func(co *async.Coroutine) async.Result {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -605,10 +606,10 @@ func Example_yield() {
 			}))
 		}()
 
-		t.Watch(&myState)
+		co.Watch(&myState)
 
 		// Yield preserves Events that are being watched.
-		return t.Yield(func(t *async.Task) async.Result {
+		return co.Yield(func(co *async.Coroutine) async.Result {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -620,9 +621,9 @@ func Example_yield() {
 				}))
 			}()
 
-			t.Watch(&myState)
+			co.Watch(&myState)
 
-			return t.Yield(async.Do(func() {
+			return co.Yield(async.Do(func() {
 				fmt.Println("v1 + v2 =", myState.v1+myState.v2)
 			}))
 		})
@@ -641,41 +642,41 @@ func ExampleOperation_Then() {
 
 	var myState async.State[int]
 
-	a := func(t *async.Task) async.Result {
-		t.Watch(&myState)
+	a := func(co *async.Coroutine) async.Result {
+		co.Watch(&myState)
 
 		v := myState.Get()
 		fmt.Println(v, "(a)")
 
 		if v < 3 {
-			return t.Await()
+			return co.Await()
 		}
 
-		return t.Switch(func(t *async.Task) async.Result {
-			t.Watch(&myState)
+		return co.Switch(func(co *async.Coroutine) async.Result {
+			co.Watch(&myState)
 
 			v := myState.Get()
 			fmt.Println(v, "(switched)")
 
 			if v < 5 {
-				return t.Await()
+				return co.Await()
 			}
 
-			return t.End()
+			return co.End()
 		})
 	}
 
-	b := func(t *async.Task) async.Result {
-		t.Watch(&myState)
+	b := func(co *async.Coroutine) async.Result {
+		co.Watch(&myState)
 
 		v := myState.Get()
 		fmt.Println(v, "(b)")
 
 		if v < 7 {
-			return t.Await()
+			return co.Await()
 		}
 
-		return t.End()
+		return co.End()
 	}
 
 	myExecutor.Spawn("zz", async.Operation(a).Then(b))

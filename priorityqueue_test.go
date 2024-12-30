@@ -4,33 +4,33 @@ import "testing"
 
 func TestPriorityQueue(t *testing.T) {
 	t.Run("Overall", func(t *testing.T) {
-		var pq priorityqueue[*Task]
+		var pq priorityqueue[*Coroutine]
 
 		for _, r := range "abcdefgh" {
-			pq.Push(&Task{path: string(r)})
+			pq.Push(&Coroutine{path: string(r)})
 		}
 
 		for _, r := range "abcd" {
-			if u := pq.Pop(); u.path != string(r) {
+			if co := pq.Pop(); co.path != string(r) {
 				t.FailNow()
 			}
 		}
 
 		for _, r := range "ijk" {
-			pq.Push(&Task{path: string(r)})
+			pq.Push(&Coroutine{path: string(r)})
 		}
 
-		pq.Push(&Task{path: "d"})
+		pq.Push(&Coroutine{path: "d"})
 
-		if u := pq.Pop(); u.path != "d" {
+		if co := pq.Pop(); co.path != "d" {
 			t.FailNow()
 		}
 
-		pq.Push(&Task{path: "g"})
-		pq.Push(&Task{path: "f"})
+		pq.Push(&Coroutine{path: "g"})
+		pq.Push(&Coroutine{path: "f"})
 
 		for _, r := range "effgghijk" {
-			if u := pq.Pop(); u.path != string(r) {
+			if co := pq.Pop(); co.path != string(r) {
 				t.FailNow()
 			}
 		}
@@ -40,17 +40,17 @@ func TestPriorityQueue(t *testing.T) {
 		}
 	})
 	t.Run("FIFO", func(t *testing.T) {
-		var pq priorityqueue[*Task]
+		var pq priorityqueue[*Coroutine]
 
-		u := &Task{path: "/"}
-		v := &Task{path: "/"}
-		w := &Task{path: "/"}
+		co1 := &Coroutine{path: "/"}
+		co2 := &Coroutine{path: "/"}
+		co3 := &Coroutine{path: "/"}
 
-		pq.Push(u)
-		pq.Push(v)
-		pq.Push(w)
+		pq.Push(co1)
+		pq.Push(co2)
+		pq.Push(co3)
 
-		if pq.Pop() != u || pq.Pop() != v || pq.Pop() != w {
+		if pq.Pop() != co1 || pq.Pop() != co2 || pq.Pop() != co3 {
 			t.FailNow()
 		}
 	})

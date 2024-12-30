@@ -4,7 +4,7 @@ package async
 // To retrieve the value, call the Get method.
 //
 // Calling the Set method of a State, in an [Operation] function, updates
-// the value and resumes any [Task] that is watching the State.
+// the value and resumes any [Coroutine] that is watching the State.
 //
 // A State must not be shared by more than one [Executor].
 type State[T any] struct {
@@ -25,7 +25,7 @@ func (s *State[T]) Get() T {
 	return s.value
 }
 
-// Set updates the value of s and resumes any [Task] that is watching s.
+// Set updates the value of s and resumes any [Coroutine] that is watching s.
 //
 // One should only call this method in an [Operation] function.
 func (s *State[T]) Set(v T) {
