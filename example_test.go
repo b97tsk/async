@@ -8,10 +8,10 @@ import (
 	"github.com/b97tsk/async"
 )
 
-// This example demonstrates how to spawn Coroutines with different paths.
+// This example demonstrates how to spawn Tasks with different paths.
 // The lower path, the higher priority.
-// This example creates a Coroutine with path "aa" for additional computations
-// and another Coroutine with path "zz" for printing results.
+// This example creates a Task with path "aa" for additional computations
+// and another Task with path "zz" for printing results.
 // The former runs before the latter because "aa" < "zz".
 func Example() {
 	// Create an Executor.
@@ -37,7 +37,7 @@ func Example() {
 		return co.Await() // Awaits signals or state changes.
 	})
 
-	// The above Coroutine re-runs whenever s1 or s2 changes. As an example, this is fine.
+	// The above Task re-runs whenever s1 or s2 changes. As an example, this is fine.
 	// In practice, one should probably use Memos to avoid unnecessary recomputations. See Example (Memo).
 
 	op := async.NewState('+')
@@ -66,11 +66,11 @@ func Example() {
 
 	fmt.Println("--- SEPARATOR ---")
 
-	// The followings create several Coroutines to mutate States.
+	// The followings create several Tasks to mutate States.
 	// They share the same path, "/", which is lower than "aa" and "zz".
 	// Remember that, the lower path, the higher priority.
-	// Updating States should have higher priority, so that when there are multiple update Coroutines,
-	// they can run together before any read Coroutine.
+	// Updating States should have higher priority, so that when there are multiple update Tasks,
+	// they can run together before any read Task.
 	// This reduces the number of reads that have to react on update.
 
 	myExecutor.Spawn("/", async.Do(func() {
@@ -307,8 +307,7 @@ func Example_nonBlocking() {
 	// s1 + s2 = 15
 }
 
-// This example demonstrates how a Coroutine can conditionally depend on
-// a State.
+// This example demonstrates how a Task can conditionally depend on a State.
 func Example_conditional() {
 	var myExecutor async.Executor
 
@@ -381,9 +380,9 @@ func Example_conditionalMemo() {
 	// 5
 }
 
-// This example demonstrates how to end a Coroutine.
-// It creates a Coroutine that prints the value of a State whenever it changes.
-// The Coroutine only prints 0, 1, 2 and 3 because it is ended after 3.
+// This example demonstrates how to end a Task.
+// It creates a Task that prints the value of a State whenever it changes.
+// The Task only prints 0, 1, 2 and 3 because it is ended after 3.
 func Example_end() {
 	var myExecutor async.Executor
 
@@ -418,8 +417,8 @@ func Example_end() {
 	// 5
 }
 
-// This example demonstrates how to add a function call before a Coroutine
-// re-runs, or after a Coroutine ends.
+// This example demonstrates how to add a function call before a Task re-runs,
+// or after a Task ends.
 func Example_defer() {
 	var myExecutor async.Executor
 
@@ -454,7 +453,7 @@ func Example_defer() {
 	// 5
 }
 
-// This example demonstrates how a Coroutine can switch from one Operation to
+// This example demonstrates how a Coroutine can switch from one Task to
 // another.
 func Example_switch() {
 	var myExecutor async.Executor
@@ -504,8 +503,8 @@ func Example_switch() {
 	// 7
 }
 
-// This example demonstrates how to chain multiple Operations together to be
-// worked on in sequence by a Coroutine.
+// This example demonstrates how to chain multiple Tasks together to be worked
+// on in sequence by a Coroutine.
 func Example_chain() {
 	var myExecutor async.Executor
 
@@ -572,7 +571,7 @@ func Example_chain() {
 }
 
 // This example demonstrates how to yield a Coroutine only for it to resume
-// later with another Operation.
+// later with another Task.
 // It computes two values in separate goroutines sequentially, then prints
 // their sum.
 // It showcases what yielding can do, not that it's a useful pattern.
@@ -635,7 +634,7 @@ func Example_yield() {
 	// v1 + v2 = 42
 }
 
-func ExampleOperation_Then() {
+func ExampleTask_Then() {
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
@@ -679,7 +678,7 @@ func ExampleOperation_Then() {
 		return co.End()
 	}
 
-	myExecutor.Spawn("zz", async.Operation(a).Then(b))
+	myExecutor.Spawn("zz", async.Task(a).Then(b))
 
 	for i := 1; i <= 9; i++ {
 		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))

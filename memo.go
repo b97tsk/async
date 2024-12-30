@@ -3,7 +3,7 @@ package async
 import "path"
 
 // A Memo is a State-like structure that carries a value that can only be set
-// in an Operation-like function.
+// in a Task-like function.
 //
 // A Memo is designed to have a value that is computed from other States.
 // What make a Memo useful are that:
@@ -96,7 +96,7 @@ func (m *Memo[T]) removeListener(co *Coroutine) {
 
 // Get retrieves the value of m.
 //
-// One should only call this method in an [Operation] function.
+// One should only call this method in a [Task] function.
 func (m *Memo[T]) Get() T {
 	if m.stale {
 		m.co.run()

@@ -59,15 +59,15 @@ func (e *Executor) Run() {
 	e.mu.Unlock()
 }
 
-// Spawn creates a [Coroutine] to work on op, using the result of path.Clean(p)
+// Spawn creates a [Coroutine] to work on t, using the result of path.Clean(p)
 // as its path.
 //
 // The Coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
 // Spawn is safe for concurrent use.
-func (e *Executor) Spawn(p string, op Operation) {
-	co := e.newCoroutine().init(e, path.Clean(p), op).recyclable()
+func (e *Executor) Spawn(p string, t Task) {
+	co := e.newCoroutine().init(e, path.Clean(p), t).recyclable()
 	e.resumeCoroutine(co)
 }
 
