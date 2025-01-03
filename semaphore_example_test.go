@@ -21,7 +21,7 @@ func ExampleSemaphore() {
 		}()
 	})
 
-	mySemaphore := async.NewSemaphore(10)
+	mySemaphore := async.NewSemaphore(12)
 
 	for n := int64(1); n <= 8; n++ {
 		myExecutor.Spawn("/", mySemaphore.Acquire(n).Then(async.Do(func() {

@@ -6,7 +6,7 @@ import "slices"
 // The callers can request access with a given weight.
 //
 // Note that this Semaphore type does not provide backpressure for spawning
-// a lot of Tasks. One should instead look for a sync implemetation.
+// a lot of Tasks. One should instead look for a sync implementation.
 //
 // A Semaphore must not be shared by more than one [Executor].
 type Semaphore struct {
@@ -48,6 +48,8 @@ func (s *Semaphore) Acquire(n int64) Task {
 }
 
 // Release releases the semaphore with a weight of n.
+//
+// One should only call this method in a [Task] function.
 func (s *Semaphore) Release(n int64) {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
