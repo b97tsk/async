@@ -84,7 +84,7 @@ func (co *Coroutine) less(other *Coroutine) bool {
 	return co.path < other.path
 }
 
-func (co *Coroutine) resume() {
+func (e *Executor) resumeCoroutine(co *Coroutine) {
 	flag := co.flag
 	if flag&flagEnded != 0 {
 		return
@@ -96,7 +96,8 @@ func (co *Coroutine) resume() {
 	}
 
 	co.flag = flag | flagStale | flagResumed
-	co.executor.resumeCoroutine(co)
+
+	e.pq.Push(co)
 }
 
 func (e *Executor) runCoroutine(co *Coroutine) {
@@ -221,14 +222,14 @@ func (co *Coroutine) Path() string {
 }
 
 // Watch watches some Events so that, when any of them notifies, co resumes.
-func (co *Coroutine) Watch(s ...Event) {
+func (co *Coroutine) Watch(ev ...Event) {
 	deps := co.deps
 	if deps == nil {
 		deps = make(map[Event]bool)
 		co.deps = deps
 	}
 
-	for _, d := range s {
+	for _, d := range ev {
 		if _, ok := deps[d]; ok {
 			deps[d] = true
 			continue
@@ -284,10 +285,10 @@ func (co *Coroutine) End() Result {
 }
 
 // Await returns a [Result] that will cause co to yield.
-// Await also accepts additional Events to be awaited for.
-func (co *Coroutine) Await(s ...Event) Result {
-	if len(s) != 0 {
-		co.Watch(s...)
+// Await also accepts additional Events to watch.
+func (co *Coroutine) Await(ev ...Event) Result {
+	if len(ev) != 0 {
+		co.Watch(ev...)
 	}
 	return Result{action: doYield}
 }

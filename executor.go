@@ -67,12 +67,9 @@ func (e *Executor) Run() {
 //
 // Spawn is safe for concurrent use.
 func (e *Executor) Spawn(p string, t Task) {
-	co := e.newCoroutine().init(e, path.Clean(p), t).recyclable()
-	e.resumeCoroutine(co)
-}
-
-func (e *Executor) resumeCoroutine(co *Coroutine) {
 	var autorun func()
+
+	co := e.newCoroutine().init(e, path.Clean(p), t).recyclable()
 
 	e.mu.Lock()
 

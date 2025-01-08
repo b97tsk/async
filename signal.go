@@ -36,7 +36,24 @@ func (s *Signal) removeListener(co *Coroutine) {
 //
 // One should only call this method in a [Task] function.
 func (s *Signal) Notify() {
+	var e *Executor
+
 	for co := range s.listeners {
-		co.resume()
+		if e == nil {
+			e = co.executor
+
+			e.mu.Lock()
+			defer e.mu.Unlock()
+
+			if !e.running {
+				panic("async(Signal): executor not running")
+			}
+		}
+
+		if e != co.executor {
+			panic("async(Signal): executor inconsistent")
+		}
+
+		e.resumeCoroutine(co)
 	}
 }
