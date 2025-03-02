@@ -12,11 +12,6 @@ type WaitGroup struct {
 	n int
 }
 
-// Counter returns the [WaitGroup] counter.
-func (wg *WaitGroup) Counter() int {
-	return wg.n
-}
-
 // Add adds delta, which may be negative, to the [WaitGroup] counter.
 // If the [WaitGroup] counter becomes zero, Add resumes any [Coroutine] that
 // is watching wg.
@@ -42,7 +37,7 @@ func (wg *WaitGroup) Done() {
 // zero, and then ends.
 func (wg *WaitGroup) Await() Task {
 	return func(co *Coroutine) Result {
-		if wg.Counter() != 0 {
+		if wg.n != 0 {
 			return co.Await(wg)
 		}
 		return co.End()
