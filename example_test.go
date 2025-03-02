@@ -328,10 +328,12 @@ func Example_conditional() {
 		return co.Await()
 	})
 
+	inc := func(i int) int { return i + 1 }
+
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
-	myExecutor.Spawn("/", async.Do(func() { s1.Set(s1.Get() + 1) }))
+	myExecutor.Spawn("/", async.Do(func() { s1.Update(inc) }))
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() }))
-	myExecutor.Spawn("/", async.Do(func() { s2.Set(s2.Get() + 1) }))
+	myExecutor.Spawn("/", async.Do(func() { s2.Update(inc) }))
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
 
 	// Output:
@@ -367,10 +369,12 @@ func Example_conditionalMemo() {
 		return co.Await()
 	})
 
+	inc := func(i int) int { return i + 1 }
+
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
-	myExecutor.Spawn("/", async.Do(func() { s1.Set(s1.Get() + 1) }))
+	myExecutor.Spawn("/", async.Do(func() { s1.Update(inc) }))
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() }))
-	myExecutor.Spawn("/", async.Do(func() { s2.Set(s2.Get() + 1) }))
+	myExecutor.Spawn("/", async.Do(func() { s2.Update(inc) }))
 	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
 
 	// Output:
