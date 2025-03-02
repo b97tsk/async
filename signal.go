@@ -6,6 +6,7 @@ package async
 // Any type that embeds [Signal] also implements Event, e.g. [State].
 type Event interface {
 	addListener(co *Coroutine)
+	pauseListener(co *Coroutine)
 	removeListener(co *Coroutine)
 }
 
@@ -16,16 +17,20 @@ type Event interface {
 //
 // A Signal must not be shared by more than one [Executor].
 type Signal struct {
-	listeners map[*Coroutine]struct{}
+	listeners map[*Coroutine]bool
 }
 
 func (s *Signal) addListener(co *Coroutine) {
 	listeners := s.listeners
 	if listeners == nil {
-		listeners = make(map[*Coroutine]struct{})
+		listeners = make(map[*Coroutine]bool)
 		s.listeners = listeners
 	}
-	listeners[co] = struct{}{}
+	listeners[co] = true
+}
+
+func (s *Signal) pauseListener(co *Coroutine) {
+	s.listeners[co] = false
 }
 
 func (s *Signal) removeListener(co *Coroutine) {
@@ -38,7 +43,11 @@ func (s *Signal) removeListener(co *Coroutine) {
 func (s *Signal) Notify() {
 	var e *Executor
 
-	for co := range s.listeners {
+	for co, listening := range s.listeners {
+		if !listening {
+			continue
+		}
+
 		if e == nil {
 			e = co.executor
 

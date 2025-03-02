@@ -124,6 +124,7 @@ func (co *Coroutine) run() {
 		deps := co.deps
 		for d := range deps {
 			deps[d] = false
+			d.pauseListener(co)
 		}
 	}
 
@@ -230,11 +231,6 @@ func (co *Coroutine) Watch(ev ...Event) {
 	}
 
 	for _, d := range ev {
-		if _, ok := deps[d]; ok {
-			deps[d] = true
-			continue
-		}
-
 		deps[d] = true
 		d.addListener(co)
 	}
