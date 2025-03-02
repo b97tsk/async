@@ -317,22 +317,24 @@ func (co *Coroutine) Switch(t Task) Result {
 // when co ends.
 type Task func(co *Coroutine) Result
 
-// Chain returns a [Task] that will work on each of the provided Tasks
-// in sequence.
-// When one Task ends, Chain works on another.
-func Chain(s ...Task) Task {
-	var t Task
+// Then returns a [Task] that first works on t, then switches to work on next
+// after t ends.
+//
+// To chain multiple Tasks, use [Chain] function.
+func (t Task) Then(next Task) Task {
+	if next == nil {
+		panic("async(Task): undefined behavior: Then(nil)")
+	}
 	return func(co *Coroutine) Result {
-		if t == nil {
-			if len(s) == 0 {
-				return co.End()
-			}
-			t, s = s[0], s[1:]
-		}
+		return co.Switch(t.then(next))
+	}
+}
+
+func (t Task) then(next Task) Task {
+	return func(co *Coroutine) Result {
 		switch res := t(co); res.action {
 		case doEnd:
-			t = nil
-			return Result{action: doSwitch}
+			return Result{action: doSwitch, switchTo: next}
 		case doYield, doSwitch:
 			if res.switchTo != nil {
 				t = res.switchTo
@@ -365,18 +367,28 @@ func NoOperation() Task {
 	return (*Coroutine).End
 }
 
-// Then returns a [Task] that first works on t, then switches to work on next
-// after t ends.
-//
-// To chain multiple Tasks, use [Chain] function.
-func (t Task) Then(next Task) Task {
-	if next == nil {
-		panic("async(Task): undefined behavior: Then(nil)")
-	}
+// Chain returns a [Task] that will work on each of the provided Tasks
+// in sequence.
+// When one Task ends, Chain works on another.
+func Chain(s ...Task) Task {
 	return func(co *Coroutine) Result {
+		return co.Switch(chain(s...))
+	}
+}
+
+func chain(s ...Task) Task {
+	var t Task
+	return func(co *Coroutine) Result {
+		if t == nil {
+			if len(s) == 0 {
+				return co.End()
+			}
+			t, s = s[0], s[1:]
+		}
 		switch res := t(co); res.action {
 		case doEnd:
-			return Result{action: doSwitch, switchTo: next}
+			t = nil
+			return Result{action: doSwitch}
 		case doYield, doSwitch:
 			if res.switchTo != nil {
 				t = res.switchTo
