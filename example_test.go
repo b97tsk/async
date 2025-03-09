@@ -574,70 +574,6 @@ func Example_chain() {
 	// 9
 }
 
-// This example demonstrates how to yield a Coroutine only for it to resume
-// later with another Task.
-// It computes two values in separate goroutines sequentially, then prints
-// their sum.
-// It showcases what yielding can do, not that it's a useful pattern.
-func Example_yield() {
-	var wg sync.WaitGroup // For keeping track of goroutines.
-
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
-
-	var myState struct {
-		async.Signal
-		v1, v2 int
-	}
-
-	myExecutor.Spawn("/", func(co *async.Coroutine) async.Result {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
-			ans := 15
-			myExecutor.Spawn("/", async.Do(func() {
-				myState.v1 = ans
-				myState.Notify()
-			}))
-		}()
-
-		co.Watch(&myState)
-
-		// Yield preserves Events that are being watched.
-		return co.Yield(func(co *async.Coroutine) async.Result {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
-				ans := 27
-				myExecutor.Spawn("/", async.Do(func() {
-					myState.v2 = ans
-					myState.Notify()
-				}))
-			}()
-
-			co.Watch(&myState)
-
-			return co.Yield(async.Do(func() {
-				fmt.Println("v1 + v2 =", myState.v1+myState.v2)
-			}))
-		})
-	})
-
-	wg.Wait()
-
-	// Output:
-	// v1 + v2 = 42
-}
-
 func ExampleTask_Then() {
 	var myExecutor async.Executor
 
@@ -702,4 +638,64 @@ func ExampleTask_Then() {
 	// 6 (b)
 	// 7 (b)
 	// 9
+}
+
+// This example computes two values in separate goroutines sequentially, then
+// prints their sum.
+func ExampleAwait() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	var myState struct {
+		async.Signal
+		v1, v2 int
+	}
+
+	myExecutor.Spawn("/", func(co *async.Coroutine) async.Result {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
+			ans := 15
+			myExecutor.Spawn("/", async.Do(func() {
+				myState.v1 = ans
+				myState.Notify()
+			}))
+		}()
+
+		return co.Switch(async.Await(&myState).Then(
+			func(co *async.Coroutine) async.Result {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
+					ans := 27
+					myExecutor.Spawn("/", async.Do(func() {
+						myState.v2 = ans
+						myState.Notify()
+					}))
+				}()
+
+				return co.Switch(async.Await(&myState).Then(
+					async.Do(func() {
+						fmt.Println("v1 + v2 =", myState.v1+myState.v2)
+					}),
+				))
+			},
+		))
+	})
+
+	wg.Wait()
+
+	// Output:
+	// v1 + v2 = 42
 }

@@ -354,17 +354,21 @@ func Do(f func()) Task {
 	}
 }
 
-// Never returns a [Task] that never ends.
-// Tasks in a [Chain] after Never are never getting worked on.
-func Never() Task {
-	return func(co *Coroutine) Result {
-		return co.Await()
-	}
-}
-
 // End returns a [Task] that ends without doing anything.
 func End() Task {
 	return (*Coroutine).End
+}
+
+// Await returns a [Task] that awaits some Events until any of them notifies,
+// and then ends.
+// If ev is empty, Await returns a [Task] that never ends.
+func Await(ev ...Event) Task {
+	return func(co *Coroutine) Result {
+		if len(ev) != 0 {
+			co.Watch(ev...)
+		}
+		return co.Yield(End())
+	}
 }
 
 // Chain returns a [Task] that will work on each of the provided Tasks
