@@ -423,7 +423,7 @@ func Example_end() {
 
 // This example demonstrates how to add a function call before a Task re-runs,
 // or after a Task ends.
-func Example_defer() {
+func Example_cleanup() {
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
@@ -434,7 +434,7 @@ func Example_defer() {
 		co.Watch(&myState)
 
 		v := myState.Get()
-		co.Defer(func() { fmt.Println(v, myState.Get()) })
+		co.Cleanup(func() { fmt.Println(v, myState.Get()) })
 
 		if v < 3 {
 			return co.Await()

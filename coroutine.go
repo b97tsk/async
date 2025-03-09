@@ -236,9 +236,9 @@ func (co *Coroutine) Watch(ev ...Event) {
 	}
 }
 
-// Defer adds a function call when co resumes or ends, or when co is switching
-// to work on another [Task].
-func (co *Coroutine) Defer(f func()) {
+// Cleanup adds a function call when co resumes or ends, or when co is
+// switching to work on another [Task].
+func (co *Coroutine) Cleanup(f func()) {
 	co.inners = append(co.inners, coroutineOrFunc{f: f})
 }
 
