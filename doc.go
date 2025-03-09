@@ -41,11 +41,11 @@
 //
 // # Use Case #3: Easy State Machines
 //
-// A [Coroutine] can also switch from one [Task] to another, just like a state
+// A [Coroutine] can also transit from one [Task] to another, just like a state
 // machine can transit from one state to another.
 // This is done by returning another specific [Result] from within a Task
 // function.
-// A Coroutine can switch from one Task to another until a Task ends it.
+// A Coroutine can transit from one Task to another until a Task ends it.
 //
 // # Spawning Async Tasks vs. Passing Data over Go Channels
 //

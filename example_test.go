@@ -457,7 +457,7 @@ func Example_cleanup() {
 	// 5
 }
 
-// This example demonstrates how a Coroutine can switch from one Task to
+// This example demonstrates how a Coroutine can transit from one Task to
 // another.
 func Example_switch() {
 	var myExecutor async.Executor
@@ -476,11 +476,11 @@ func Example_switch() {
 			return co.Await()
 		}
 
-		return co.Switch(func(co *async.Coroutine) async.Result {
+		return co.Transit(func(co *async.Coroutine) async.Result {
 			co.Watch(&myState)
 
 			v := myState.Get()
-			fmt.Println(v, "(switched)")
+			fmt.Println(v, "(transited)")
 
 			if v < 5 {
 				return co.Await()
@@ -501,9 +501,9 @@ func Example_switch() {
 	// 1
 	// 2
 	// 3
-	// 3 (switched)
-	// 4 (switched)
-	// 5 (switched)
+	// 3 (transited)
+	// 4 (transited)
+	// 5 (transited)
 	// 7
 }
 
@@ -527,11 +527,11 @@ func Example_chain() {
 				return co.Await()
 			}
 
-			return co.Switch(func(co *async.Coroutine) async.Result {
+			return co.Transit(func(co *async.Coroutine) async.Result {
 				co.Watch(&myState)
 
 				v := myState.Get()
-				fmt.Println(v, "(switched)")
+				fmt.Println(v, "(transited)")
 
 				if v < 5 {
 					return co.Await()
@@ -565,9 +565,9 @@ func Example_chain() {
 	// 1 (first)
 	// 2 (first)
 	// 3 (first)
-	// 3 (switched)
-	// 4 (switched)
-	// 5 (switched)
+	// 3 (transited)
+	// 4 (transited)
+	// 5 (transited)
 	// 5 (second)
 	// 6 (second)
 	// 7 (second)
@@ -591,11 +591,11 @@ func ExampleTask_Then() {
 			return co.Await()
 		}
 
-		return co.Switch(func(co *async.Coroutine) async.Result {
+		return co.Transit(func(co *async.Coroutine) async.Result {
 			co.Watch(&myState)
 
 			v := myState.Get()
-			fmt.Println(v, "(switched)")
+			fmt.Println(v, "(transited)")
 
 			if v < 5 {
 				return co.Await()
@@ -631,9 +631,9 @@ func ExampleTask_Then() {
 	// 1 (a)
 	// 2 (a)
 	// 3 (a)
-	// 3 (switched)
-	// 4 (switched)
-	// 5 (switched)
+	// 3 (transited)
+	// 4 (transited)
+	// 5 (transited)
 	// 5 (b)
 	// 6 (b)
 	// 7 (b)
@@ -672,7 +672,7 @@ func ExampleAwait() {
 			}))
 		}()
 
-		return co.Switch(async.Await(&myState).Then(
+		return co.Transit(async.Await(&myState).Then(
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
 				go func() {
@@ -685,7 +685,7 @@ func ExampleAwait() {
 					}))
 				}()
 
-				return co.Switch(async.Await(&myState).Then(
+				return co.Transit(async.Await(&myState).Then(
 					async.Do(func() {
 						fmt.Println("v1 + v2 =", myState.v1+myState.v2)
 					}),

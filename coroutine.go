@@ -5,7 +5,7 @@ import "path"
 const (
 	doEnd = iota
 	doYield
-	doSwitch
+	doTransit
 )
 
 const (
@@ -32,9 +32,9 @@ const (
 // A notification of such an Event resumes the Coroutine.
 // When a Coroutine is resumed, the Executor runs the Coroutine again.
 //
-// A Coroutine can also switch to work on another Task function according to
-// the return value of the Task function.
-// A Coroutine can switch from one Task to another until a Task ends it.
+// A Coroutine can also make a transit to work on another Task function
+// according to the return value of the Task function.
+// A Coroutine can transit from one Task to another until a Task ends it.
 type Coroutine struct {
 	executor *Executor
 	path     string
@@ -137,11 +137,11 @@ func (co *Coroutine) run() {
 
 		res = co.task(co)
 
-		if res.switchTo != nil {
-			co.task = res.switchTo
+		if res.transitTo != nil {
+			co.task = res.transitTo
 		}
 
-		if res.action != doSwitch {
+		if res.action != doTransit {
 			break
 		}
 
@@ -237,7 +237,7 @@ func (co *Coroutine) Watch(ev ...Event) {
 }
 
 // Cleanup adds a function call when co resumes or ends, or when co is
-// switching to work on another [Task].
+// transiting to work on another [Task].
 func (co *Coroutine) Cleanup(f func()) {
 	co.inners = append(co.inners, coroutineOrFunc{f: f})
 }
@@ -246,7 +246,7 @@ func (co *Coroutine) Cleanup(f func()) {
 // path.Join(co.Path(), p) as its path.
 //
 // Inner Coroutines are ended automatically when the outer one resumes or
-// ends, or when the outer one is switching to work on another Task.
+// ends, or when the outer one is making a transit to work on another Task.
 func (co *Coroutine) Spawn(p string, t Task) {
 	inner := co.executor.newCoroutine().init(co.executor, path.Join(co.path, p), t).recyclable()
 	inner.run()
@@ -267,15 +267,15 @@ func (co *Coroutine) Spawn(p string, t Task) {
 //   - [Coroutine.Await]: for yielding a Coroutine with additional Events to
 //     watch;
 //   - [Coroutine.Yield]: for yielding a Coroutine with another Task to which
-//     will be switched later when resuming;
-//   - [Coroutine.Switch]: for switching to another Task.
+//     will be transited later when resuming;
+//   - [Coroutine.Transit]: for transiting to another Task.
 type Result struct {
-	action   int
-	switchTo Task
+	action    int
+	transitTo Task
 }
 
-// End returns a [Result] that will cause co to end or switch to work on
-// another [Task] in a [Chain].
+// End returns a [Result] that will cause co to end or make a transit to work
+// on another [Task] in a [Chain].
 func (co *Coroutine) End() Result {
 	return Result{action: doEnd}
 }
@@ -289,23 +289,21 @@ func (co *Coroutine) Await(ev ...Event) Result {
 	return Result{action: doYield}
 }
 
-// Yield returns a [Result] that will cause co to yield.
-// t becomes the current Task of co so that, when co is resumed, t is called
-// instead.
+// Yield returns a [Result] that will cause co to yield and, when co is resumed,
+// make a transit to work on t instead.
 func (co *Coroutine) Yield(t Task) Result {
 	if t == nil {
 		panic("async(Coroutine): undefined behavior: Yield(nil)")
 	}
-	return Result{action: doYield, switchTo: t}
+	return Result{action: doYield, transitTo: t}
 }
 
-// Switch returns a [Result] that will cause co to switch to work on t.
-// co will be reset and t will be called immediately as the current Task of co.
-func (co *Coroutine) Switch(t Task) Result {
+// Transit returns a [Result] that will cause co to make a transit to work on t.
+func (co *Coroutine) Transit(t Task) Result {
 	if t == nil {
-		panic("async(Coroutine): undefined behavior: Switch(nil)")
+		panic("async(Coroutine): undefined behavior: Transit(nil)")
 	}
-	return Result{action: doSwitch, switchTo: t}
+	return Result{action: doTransit, transitTo: t}
 }
 
 // A Task is a piece of work that a [Coroutine] is given to do when it is
@@ -317,8 +315,7 @@ func (co *Coroutine) Switch(t Task) Result {
 // when co ends.
 type Task func(co *Coroutine) Result
 
-// Then returns a [Task] that first works on t, then switches to work on next
-// after t ends.
+// Then returns a [Task] that first works on t, then next after t ends.
 //
 // To chain multiple Tasks, use [Chain] function.
 func (t Task) Then(next Task) Task {
@@ -326,7 +323,7 @@ func (t Task) Then(next Task) Task {
 		panic("async(Task): undefined behavior: Then(nil)")
 	}
 	return func(co *Coroutine) Result {
-		return co.Switch(t.then(next))
+		return co.Transit(t.then(next))
 	}
 }
 
@@ -334,10 +331,10 @@ func (t Task) then(next Task) Task {
 	return func(co *Coroutine) Result {
 		switch res := t(co); res.action {
 		case doEnd:
-			return Result{action: doSwitch, switchTo: next}
-		case doYield, doSwitch:
-			if res.switchTo != nil {
-				t = res.switchTo
+			return Result{action: doTransit, transitTo: next}
+		case doYield, doTransit:
+			if res.transitTo != nil {
+				t = res.transitTo
 			}
 			return Result{action: res.action}
 		default:
@@ -376,7 +373,7 @@ func Await(ev ...Event) Task {
 // When one Task ends, Chain works on another.
 func Chain(s ...Task) Task {
 	return func(co *Coroutine) Result {
-		return co.Switch(chain(s...))
+		return co.Transit(chain(s...))
 	}
 }
 
@@ -392,10 +389,10 @@ func chain(s ...Task) Task {
 		switch res := t(co); res.action {
 		case doEnd:
 			t = nil
-			return Result{action: doSwitch}
-		case doYield, doSwitch:
-			if res.switchTo != nil {
-				t = res.switchTo
+			return Result{action: doTransit}
+		case doYield, doTransit:
+			if res.transitTo != nil {
+				t = res.transitTo
 			}
 			return Result{action: res.action}
 		default:
