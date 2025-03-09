@@ -40,7 +40,7 @@ func (s *Semaphore) Acquire(n int64) Task {
 			w := &waiter{n: n}
 			s.waiters = append(s.waiters, w)
 			co.Watch(w)
-			return co.Yield(NoOperation())
+			return co.Yield(End())
 		}
 		s.cur += n
 		return co.End()

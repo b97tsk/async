@@ -362,8 +362,8 @@ func Never() Task {
 	}
 }
 
-// NoOperation returns a [Task] that ends without doing anything.
-func NoOperation() Task {
+// End returns a [Task] that ends without doing anything.
+func End() Task {
 	return (*Coroutine).End
 }
 
