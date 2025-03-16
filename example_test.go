@@ -808,3 +808,57 @@ func ExampleFunc() {
 	// defer 1
 	// 9
 }
+
+func ExampleFunc_exit() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", async.Block(
+		async.Defer( // Note that spawned Tasks are considered surrounded by an invisible [Func].
+			async.Do(func() { fmt.Println("defer 1") }),
+		),
+		async.Func(async.Block( // A block in a function scope.
+			async.Defer(
+				async.Do(func() { fmt.Println("defer 2") }),
+			),
+			async.Loop(async.Block(
+				async.Await(&myState),
+				func(co *async.Coroutine) async.Result {
+					if v := myState.Get(); v%2 == 0 {
+						return co.Continue()
+					}
+					return co.End()
+				},
+				async.Do(func() {
+					fmt.Println(myState.Get())
+				}),
+				func(co *async.Coroutine) async.Result {
+					if v := myState.Get(); v >= 7 {
+						return co.Exit() // Exit here.
+					}
+					return co.End()
+				},
+			)),
+			async.Do(func() { fmt.Println("after Loop") }), // Didn't run due to early exit.
+		)),
+		async.Do(func() { fmt.Println("after Func") }), // Didn't run due to early exit.
+	))
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// defer 2
+	// defer 1
+	// 9
+}

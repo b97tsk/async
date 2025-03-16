@@ -9,6 +9,7 @@ const (
 	doBreak
 	doContinue
 	doReturn
+	doExit
 	doTailTransit // Transit and remove controller.
 )
 
@@ -376,6 +377,12 @@ func (co *Coroutine) Return() Result {
 	return Result{action: doReturn}
 }
 
+// Exit returns a [Result] that will cause co to exit.
+// All deferred Tasks will be run before co exits.
+func (co *Coroutine) Exit() Result {
+	return Result{action: doExit}
+}
+
 // A Task is a piece of work that a [Coroutine] is given to do when it is
 // spawned.
 // The return value of a Task, a [Result], determines what next for a Coroutine
@@ -599,6 +606,12 @@ func Return() Task {
 	return (*Coroutine).Return
 }
 
+// Exit returns a [Task] that causes the Coroutine that runs it to exit.
+// All deferred Tasks are run before the Coroutine exits.
+func Exit() Task {
+	return (*Coroutine).Exit
+}
+
 // Func returns a [Task] that runs t in a function scope.
 // Spawned Tasks are considered surrounded by an invisible [Func].
 func Func(t Task) Task {
@@ -612,11 +625,18 @@ func Func(t Task) Task {
 }
 
 func funcController(keep int) controller {
+	var exitInstead bool
 	return func(co *Coroutine, res Result) Result {
 		switch res.action {
+		case doExit:
+			exitInstead = true
+			fallthrough
 		case doEnd, doReturn:
 			defers := co.defers
 			if len(defers) == keep {
+				if exitInstead {
+					return co.Exit()
+				}
 				return co.End()
 			}
 			i := len(defers) - 1
