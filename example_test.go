@@ -679,3 +679,77 @@ func ExampleBlock() {
 	// 7
 	// 9
 }
+
+func ExampleLoop() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", async.Loop(async.Block(
+		async.Await(&myState),
+		func(co *async.Coroutine) async.Result {
+			if v := myState.Get(); v%2 == 0 {
+				return co.Continue()
+			}
+			return co.End()
+		},
+		async.Do(func() {
+			fmt.Println(myState.Get())
+		}),
+		func(co *async.Coroutine) async.Result {
+			if v := myState.Get(); v >= 7 {
+				return co.Break()
+			}
+			return co.End()
+		},
+	)))
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// 9
+}
+
+func ExampleLoopN() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", async.LoopN(7, async.Block(
+		async.Await(&myState),
+		func(co *async.Coroutine) async.Result {
+			if v := myState.Get(); v%2 == 0 {
+				return co.Continue()
+			}
+			return co.End()
+		},
+		async.Do(func() {
+			fmt.Println(myState.Get())
+		}),
+	)))
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// 9
+}

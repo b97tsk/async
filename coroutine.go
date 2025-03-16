@@ -6,6 +6,8 @@ const (
 	doEnd = iota
 	doYield
 	doTransit
+	doBreak
+	doContinue
 )
 
 const (
@@ -148,7 +150,7 @@ func (co *Coroutine) run() {
 		co.clearDeps()
 	}
 
-	if res.action != doEnd {
+	if res.action == doYield {
 		deps := co.deps
 		for d, inUse := range deps {
 			if !inUse {
@@ -158,8 +160,20 @@ func (co *Coroutine) run() {
 		}
 	}
 
-	if res.action == doEnd || len(co.deps) == 0 && len(co.inners) == 0 {
+	if res.action != doYield || len(co.deps) == 0 && len(co.inners) == 0 {
 		co.end()
+	}
+
+	switch res.action {
+	case doEnd, doYield:
+	case doTransit:
+		panic("async(Coroutine): unhandled switch action (internal error)")
+	case doBreak:
+		panic("async(Coroutine): unhandled break action")
+	case doContinue:
+		panic("async(Coroutine): unhandled continue action")
+	default:
+		panic("async(Coroutine): unknown action (internal error)")
 	}
 }
 
@@ -271,6 +285,7 @@ func (co *Coroutine) Spawn(p string, t Task) {
 //   - [Coroutine.Transit]: for transiting to another Task.
 type Result struct {
 	action    int
+	label     Label
 	transitTo Task
 }
 
@@ -306,6 +321,28 @@ func (co *Coroutine) Transit(t Task) Result {
 	return Result{action: doTransit, transitTo: t}
 }
 
+// Break returns a [Result] that will cause co to break a loop.
+func (co *Coroutine) Break() Result {
+	return co.BreakLabel(NoLabel)
+}
+
+// BreakLabel returns a [Result] that will cause co to break a loop with label
+// l.
+func (co *Coroutine) BreakLabel(l Label) Result {
+	return Result{action: doBreak, label: l}
+}
+
+// Continue returns a [Result] that will cause co to continue a loop.
+func (co *Coroutine) Continue() Result {
+	return co.ContinueLabel(NoLabel)
+}
+
+// ContinueLabel returns a [Result] that will cause co to continue a loop with
+// label l.
+func (co *Coroutine) ContinueLabel(l Label) Result {
+	return Result{action: doContinue, label: l}
+}
+
 // A Task is a piece of work that a [Coroutine] is given to do when it is
 // spawned.
 // The return value of a Task, a [Result], determines what next for a Coroutine
@@ -338,7 +375,7 @@ func (t Task) then(next Task) Task {
 			}
 			return Result{action: res.action}
 		default:
-			panic("async: internal error: unknown action")
+			return res
 		}
 	}
 }
@@ -395,7 +432,116 @@ func chain(s ...Task) Task {
 			}
 			return Result{action: res.action}
 		default:
-			panic("async: internal error: unknown action")
+			return res
+		}
+	}
+}
+
+// Break returns a [Task] that breaks a loop.
+func Break() Task {
+	return (*Coroutine).Break
+}
+
+// BreakLabel returns a [Task] that breaks a loop with label l.
+func BreakLabel(l Label) Task {
+	return func(co *Coroutine) Result {
+		return co.BreakLabel(l)
+	}
+}
+
+// Continue returns a [Task] that continues a loop.
+func Continue() Task {
+	return (*Coroutine).Continue
+}
+
+// ContinueLabel returns a [Task] that continues a loop with label l.
+func ContinueLabel(l Label) Task {
+	return func(co *Coroutine) Result {
+		return co.ContinueLabel(l)
+	}
+}
+
+const NoLabel Label = ""
+
+type Label string
+
+// Loop returns a [Task] that forms a loop, which would run t repeatedly.
+// Both [Coroutine.Break] and [Break] can break this loop early.
+// Both [Coroutine.Continue] and [Continue] can continue this loop early.
+func Loop(t Task) Task {
+	return LoopLabel(NoLabel, t)
+}
+
+// LoopN returns a [Task] that forms a loop, which would run t repeatedly
+// for n times.
+// Both [Coroutine.Break] and [Break] can break this loop early.
+// Both [Coroutine.Continue] and [Continue] can continue this loop early.
+func LoopN(n int, t Task) Task {
+	return LoopLabelN(NoLabel, n, t)
+}
+
+// LoopLabel returns a [Task] that forms a loop with label l, which would
+// run t repeatedly.
+// Both [Coroutine.Break] and [Break] can break this loop early.
+// Both [Coroutine.Continue] and [Continue] can continue this loop early.
+// Both [Coroutine.BreakLabel] and [BreakLabel], with label l, can
+// break this loop early.
+// Both [Coroutine.ContinueLabel] and [ContinueLabel], with label l, can
+// continue this loop early.
+func LoopLabel(l Label, t Task) Task {
+	return func(co *Coroutine) Result {
+		return co.Transit(loop(l, t))
+	}
+}
+
+// LoopLabelN returns a [Task] that forms a loop with label l, which would
+// run t repeatedly for n times.
+// Both [Coroutine.Break] and [Break] can break this loop early.
+// Both [Coroutine.Continue] and [Continue] can continue this loop early.
+// Both [Coroutine.BreakLabel] and [BreakLabel], with label l, can
+// break this loop early.
+// Both [Coroutine.ContinueLabel] and [ContinueLabel], with label l, can
+// continue this loop early.
+func LoopLabelN(l Label, n int, t Task) Task {
+	return func(co *Coroutine) Result {
+		i := 0
+		return co.Transit(loop(l, func(co *Coroutine) Result {
+			if i < n {
+				i++
+				return co.Transit(t)
+			}
+			return co.Break()
+		}))
+	}
+}
+
+func loop(l Label, t Task) Task {
+	t0 := t
+	return func(co *Coroutine) Result {
+		switch res := t(co); res.action {
+		case doEnd:
+			t = t0
+			return Result{action: doTransit}
+		case doYield, doTransit:
+			if res.transitTo != nil {
+				t = res.transitTo
+			}
+			return Result{action: res.action}
+		case doBreak:
+			switch res.label {
+			case l, NoLabel:
+				return co.End()
+			}
+			return res
+		case doContinue:
+			switch res.label {
+			case l, NoLabel:
+				t = t0
+				return Result{action: doTransit}
+			}
+			return res
+		default:
+			return res
 		}
 	}
 }
