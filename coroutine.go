@@ -8,6 +8,8 @@ const (
 	doTransit
 	doBreak
 	doContinue
+	doReturn
+	doTailTransit // Transit and remove controller.
 )
 
 const (
@@ -38,19 +40,23 @@ const (
 // according to the return value of the Task function.
 // A Coroutine can transit from one Task to another until a Task ends it.
 type Coroutine struct {
-	executor *Executor
-	path     string
-	task     Task
-	flag     uint8
-	deps     map[Event]bool
-	inners   []coroutineOrFunc
-	outer    *Coroutine
+	executor    *Executor
+	path        string
+	task        Task
+	flag        uint8
+	deps        map[Event]bool
+	inners      []coroutineOrFunc
+	outer       *Coroutine
+	defers      []Task
+	controllers []controller
 }
 
 type coroutineOrFunc struct {
 	co *Coroutine
 	f  func()
 }
+
+type controller func(co *Coroutine, res Result) Result
 
 func (e *Executor) newCoroutine() *Coroutine {
 	if co := e.pool.Get(); co != nil {
@@ -122,12 +128,15 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 }
 
 func (co *Coroutine) run() {
+	var anyPaused bool
+
 	{
 		deps := co.deps
 		for d := range deps {
 			deps[d] = false
 			d.pauseListener(co)
 		}
+		anyPaused = len(deps) != 0
 	}
 
 	var res Result
@@ -139,6 +148,28 @@ func (co *Coroutine) run() {
 
 		res = co.task(co)
 
+		if res.action != doYield && res.action != doTransit {
+			controllers := co.controllers
+			for len(controllers) != 0 {
+				i := len(controllers) - 1
+				res = controllers[i](co, res)
+				if res.action != doTransit {
+					controllers[i] = nil
+					controllers = controllers[:i]
+					co.controllers = controllers
+				}
+				if res.action == doTransit || res.action == doTailTransit {
+					break
+				}
+			}
+			if res.action != doTransit && res.action != doTailTransit {
+				res = rootController(co, res)
+			}
+			if res.action == doTailTransit {
+				res.action = doTransit
+			}
+		}
+
 		if res.transitTo != nil {
 			co.task = res.transitTo
 		}
@@ -147,10 +178,18 @@ func (co *Coroutine) run() {
 			break
 		}
 
+		if res.controller != nil {
+			co.controllers = append(co.controllers, res.controller)
+			if maxCapSize := 1000000; cap(co.controllers) > maxCapSize {
+				panic("async: too many controllers or recursions")
+			}
+		}
+
 		co.clearDeps()
+		anyPaused = false
 	}
 
-	if res.action == doYield {
+	if res.action == doYield && anyPaused {
 		deps := co.deps
 		for d, inUse := range deps {
 			if !inUse {
@@ -162,18 +201,6 @@ func (co *Coroutine) run() {
 
 	if res.action != doYield || len(co.deps) == 0 && len(co.inners) == 0 {
 		co.end()
-	}
-
-	switch res.action {
-	case doEnd, doYield:
-	case doTransit:
-		panic("async(Coroutine): unhandled switch action (internal error)")
-	case doBreak:
-		panic("async(Coroutine): unhandled break action")
-	case doContinue:
-		panic("async(Coroutine): unhandled continue action")
-	default:
-		panic("async(Coroutine): unknown action (internal error)")
 	}
 }
 
@@ -256,6 +283,12 @@ func (co *Coroutine) Cleanup(f func()) {
 	co.inners = append(co.inners, coroutineOrFunc{f: f})
 }
 
+// Defer adds a [Task] for execution when returning from a [Func].
+// Deferred Tasks are executed in last-in-first-out (LIFO) order.
+func (co *Coroutine) Defer(t Task) {
+	co.defers = append(co.defers, must(t))
+}
+
 // Spawn creates an inner [Coroutine] to work on t, using the result of
 // path.Join(co.Path(), p) as its path.
 //
@@ -284,9 +317,10 @@ func (co *Coroutine) Spawn(p string, t Task) {
 //     will be transited later when resuming;
 //   - [Coroutine.Transit]: for transiting to another Task.
 type Result struct {
-	action    int
-	label     Label
-	transitTo Task
+	action     int
+	label      Label      // used by: doBreak, doContinue
+	transitTo  Task       // used by: doYield, doTransit, doTailTransit
+	controller controller // used by: doTransit
 }
 
 // End returns a [Result] that will cause co to end or make a transit to work
@@ -307,18 +341,12 @@ func (co *Coroutine) Await(ev ...Event) Result {
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
 // make a transit to work on t instead.
 func (co *Coroutine) Yield(t Task) Result {
-	if t == nil {
-		panic("async(Coroutine): undefined behavior: Yield(nil)")
-	}
-	return Result{action: doYield, transitTo: t}
+	return Result{action: doYield, transitTo: must(t)}
 }
 
 // Transit returns a [Result] that will cause co to make a transit to work on t.
 func (co *Coroutine) Transit(t Task) Result {
-	if t == nil {
-		panic("async(Coroutine): undefined behavior: Transit(nil)")
-	}
-	return Result{action: doTransit, transitTo: t}
+	return Result{action: doTransit, transitTo: must(t)}
 }
 
 // Break returns a [Result] that will cause co to break a loop.
@@ -343,6 +371,11 @@ func (co *Coroutine) ContinueLabel(l Label) Result {
 	return Result{action: doContinue, label: l}
 }
 
+// Return returns a [Result] that will cause co to return from a [Func].
+func (co *Coroutine) Return() Result {
+	return Result{action: doReturn}
+}
+
 // A Task is a piece of work that a [Coroutine] is given to do when it is
 // spawned.
 // The return value of a Task, a [Result], determines what next for a Coroutine
@@ -356,24 +389,20 @@ type Task func(co *Coroutine) Result
 //
 // To chain multiple Tasks, use [Block] function.
 func (t Task) Then(next Task) Task {
-	if next == nil {
-		panic("async(Task): undefined behavior: Then(nil)")
-	}
 	return func(co *Coroutine) Result {
-		return co.Transit(t.then(next))
+		return Result{
+			action:     doTransit,
+			transitTo:  must(t),
+			controller: thenController(next),
+		}
 	}
 }
 
-func (t Task) then(next Task) Task {
-	return func(co *Coroutine) Result {
-		switch res := t(co); res.action {
+func thenController(t Task) controller {
+	return func(co *Coroutine, res Result) Result {
+		switch res.action {
 		case doEnd:
-			return Result{action: doTransit, transitTo: next}
-		case doYield, doTransit:
-			if res.transitTo != nil {
-				t = res.transitTo
-			}
-			return Result{action: res.action}
+			return Result{action: doTailTransit, transitTo: must(t)}
 		default:
 			return res
 		}
@@ -408,29 +437,37 @@ func Await(ev ...Event) Task {
 // Block returns a [Task] that runs each of the provided Tasks in sequence.
 // When one Task ends, Block runs another.
 func Block(s ...Task) Task {
+	switch len(s) {
+	case 0:
+		return End()
+	case 1:
+		return s[0]
+	case 2:
+		return s[0].Then(s[1])
+	}
 	return func(co *Coroutine) Result {
-		return co.Transit(chain(s...))
+		return Result{
+			action:     doTransit,
+			transitTo:  must(s[0]),
+			controller: blockController(s[1:]),
+		}
 	}
 }
 
-func chain(s ...Task) Task {
-	var t Task
-	return func(co *Coroutine) Result {
-		if t == nil {
+func blockController(s []Task) controller {
+	return func(co *Coroutine, res Result) Result {
+		switch res.action {
+		case doEnd:
 			if len(s) == 0 {
 				return co.End()
 			}
-			t, s = s[0], s[1:]
-		}
-		switch res := t(co); res.action {
-		case doEnd:
-			t = nil
-			return Result{action: doTransit}
-		case doYield, doTransit:
-			if res.transitTo != nil {
-				t = res.transitTo
+			t := s[0]
+			s = s[1:]
+			action := doTransit
+			if len(s) == 0 {
+				action = doTailTransit
 			}
-			return Result{action: res.action}
+			return Result{action: action, transitTo: must(t)}
 		default:
 			return res
 		}
@@ -490,7 +527,11 @@ func LoopN(n int, t Task) Task {
 // continue this loop early.
 func LoopLabel(l Label, t Task) Task {
 	return func(co *Coroutine) Result {
-		return co.Transit(loop(l, t))
+		return Result{
+			action:     doTransit,
+			transitTo:  must(t),
+			controller: loopController(l, t),
+		}
 	}
 }
 
@@ -505,28 +546,26 @@ func LoopLabel(l Label, t Task) Task {
 func LoopLabelN(l Label, n int, t Task) Task {
 	return func(co *Coroutine) Result {
 		i := 0
-		return co.Transit(loop(l, func(co *Coroutine) Result {
+		u := func(co *Coroutine) Result {
 			if i < n {
 				i++
 				return co.Transit(t)
 			}
 			return co.Break()
-		}))
+		}
+		return Result{
+			action:     doTransit,
+			transitTo:  u,
+			controller: loopController(l, u),
+		}
 	}
 }
 
-func loop(l Label, t Task) Task {
-	t0 := t
-	return func(co *Coroutine) Result {
-		switch res := t(co); res.action {
+func loopController(l Label, t Task) controller {
+	return func(co *Coroutine, res Result) Result {
+		switch res.action {
 		case doEnd:
-			t = t0
-			return Result{action: doTransit}
-		case doYield, doTransit:
-			if res.transitTo != nil {
-				t = res.transitTo
-			}
-			return Result{action: res.action}
+			return co.Transit(t)
 		case doBreak:
 			switch res.label {
 			case l, NoLabel:
@@ -536,8 +575,7 @@ func loop(l Label, t Task) Task {
 		case doContinue:
 			switch res.label {
 			case l, NoLabel:
-				t = t0
-				return Result{action: doTransit}
+				return co.Transit(t)
 			}
 			return res
 		default:
@@ -545,3 +583,62 @@ func loop(l Label, t Task) Task {
 		}
 	}
 }
+
+// Defer returns a [Task] that adds t for execution when returning from
+// a [Func].
+// Deferred Tasks are executed in last-in-first-out (LIFO) order.
+func Defer(t Task) Task {
+	return func(co *Coroutine) Result {
+		co.Defer(t)
+		return co.End()
+	}
+}
+
+// Return returns a [Task] that returns from a surrounding [Func].
+func Return() Task {
+	return (*Coroutine).Return
+}
+
+// Func returns a [Task] that runs t in a function scope.
+// Spawned Tasks are considered surrounded by an invisible [Func].
+func Func(t Task) Task {
+	return func(co *Coroutine) Result {
+		return Result{
+			action:     doTransit,
+			transitTo:  must(t),
+			controller: funcController(len(co.defers)),
+		}
+	}
+}
+
+func funcController(keep int) controller {
+	return func(co *Coroutine, res Result) Result {
+		switch res.action {
+		case doEnd, doReturn:
+			defers := co.defers
+			if len(defers) == keep {
+				return co.End()
+			}
+			i := len(defers) - 1
+			t := defers[i]
+			defers[i] = nil
+			co.defers = defers[:i]
+			return co.Transit(t)
+		case doBreak:
+			panic("async: unhandled break action")
+		case doContinue:
+			panic("async: unhandled continue action")
+		default:
+			panic("async: unknown action (internal error)")
+		}
+	}
+}
+
+func must(t Task) Task {
+	if t == nil {
+		panic("async: nil Task")
+	}
+	return t
+}
+
+var rootController = funcController(0)
