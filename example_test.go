@@ -507,73 +507,8 @@ func Example_switch() {
 	// 7
 }
 
-// This example demonstrates how to chain multiple Tasks together to be worked
-// on in sequence by a Coroutine.
-func Example_chain() {
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(myExecutor.Run)
-
-	var myState async.State[int]
-
-	myExecutor.Spawn("zz", async.Chain(
-		func(co *async.Coroutine) async.Result {
-			co.Watch(&myState)
-
-			v := myState.Get()
-			fmt.Println(v, "(first)")
-
-			if v < 3 {
-				return co.Await()
-			}
-
-			return co.Transit(func(co *async.Coroutine) async.Result {
-				co.Watch(&myState)
-
-				v := myState.Get()
-				fmt.Println(v, "(transited)")
-
-				if v < 5 {
-					return co.Await()
-				}
-
-				return co.End()
-			})
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Watch(&myState)
-
-			v := myState.Get()
-			fmt.Println(v, "(second)")
-
-			if v < 7 {
-				return co.Await()
-			}
-
-			return co.End()
-		},
-	))
-
-	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
-	}
-
-	fmt.Println(myState.Get()) // Prints 9.
-
-	// Output:
-	// 0 (first)
-	// 1 (first)
-	// 2 (first)
-	// 3 (first)
-	// 3 (transited)
-	// 4 (transited)
-	// 5 (transited)
-	// 5 (second)
-	// 6 (second)
-	// 7 (second)
-	// 9
-}
-
+// This example demonstrates how to run a Task after another.
+// To run multiple Tasks in sequence, use [async.Block] instead.
 func ExampleTask_Then() {
 	var myExecutor async.Executor
 
@@ -698,4 +633,49 @@ func ExampleAwait() {
 
 	// Output:
 	// v1 + v2 = 42
+}
+
+// This example demonstrates how to run a block of Tasks.
+// A block can have zero or more Tasks.
+// A block runs Tasks in sequence.
+func ExampleBlock() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+		var t async.Task
+
+		t = async.Block(
+			async.Await(&myState),
+			async.Do(func() {
+				if v := myState.Get(); v%2 != 0 {
+					fmt.Println(v)
+				}
+			}),
+			func(co *async.Coroutine) async.Result {
+				if v := myState.Get(); v >= 7 {
+					return co.End()
+				}
+				return co.Transit(t) // Transit to t again to form a loop.
+			},
+		)
+
+		return co.Transit(t)
+	})
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// 9
 }

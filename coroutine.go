@@ -275,7 +275,7 @@ type Result struct {
 }
 
 // End returns a [Result] that will cause co to end or make a transit to work
-// on another [Task] in a [Chain].
+// on another [Task].
 func (co *Coroutine) End() Result {
 	return Result{action: doEnd}
 }
@@ -317,7 +317,7 @@ type Task func(co *Coroutine) Result
 
 // Then returns a [Task] that first works on t, then next after t ends.
 //
-// To chain multiple Tasks, use [Chain] function.
+// To chain multiple Tasks, use [Block] function.
 func (t Task) Then(next Task) Task {
 	if next == nil {
 		panic("async(Task): undefined behavior: Then(nil)")
@@ -368,10 +368,9 @@ func Await(ev ...Event) Task {
 	}
 }
 
-// Chain returns a [Task] that will work on each of the provided Tasks
-// in sequence.
-// When one Task ends, Chain works on another.
-func Chain(s ...Task) Task {
+// Block returns a [Task] that runs each of the provided Tasks in sequence.
+// When one Task ends, Block runs another.
+func Block(s ...Task) Task {
 	return func(co *Coroutine) Result {
 		return co.Transit(chain(s...))
 	}
