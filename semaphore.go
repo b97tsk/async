@@ -6,7 +6,7 @@ import "slices"
 // The callers can request access with a given weight.
 //
 // Note that this Semaphore type does not provide backpressure for spawning
-// a lot of Tasks. One should instead look for a sync implementation.
+// a lot of tasks. One should instead look for a sync implementation.
 //
 // A Semaphore must not be shared by more than one [Executor].
 type Semaphore struct {

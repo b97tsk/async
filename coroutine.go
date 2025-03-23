@@ -24,22 +24,22 @@ const (
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
 // and stackless.
 //
-// A Coroutine is created with a function called [Task].
-// A Coroutine's job is to end the Task.
-// When an [Executor] spawns a Coroutine with a Task, it runs the Coroutine by
-// calling the Task function with the Coroutine as the argument.
-// The return value determines whether to end the Coroutine or to yield it
+// A coroutine is created with a function called [Task].
+// A coroutine's job is to end the task.
+// When an [Executor] spawns a coroutine with a task, it runs the coroutine by
+// calling the task function with the coroutine as the argument.
+// The return value determines whether to end the coroutine or to yield it
 // so that it could resume later.
 //
-// In order for a Coroutine to resume, the Coroutine must watch at least one
-// [Event] (e.g. [Signal], [State] and [Memo], etc.), when calling the Task
+// In order for a coroutine to resume, the coroutine must watch at least one
+// [Event] (e.g. [Signal], [State] and [Memo], etc.), when calling the task
 // function.
-// A notification of such an Event resumes the Coroutine.
-// When a Coroutine is resumed, the Executor runs the Coroutine again.
+// A notification of such an event resumes the coroutine.
+// When a coroutine is resumed, the executor runs the coroutine again.
 //
-// A Coroutine can also make a transit to work on another Task function
-// according to the return value of the Task function.
-// A Coroutine can transit from one Task to another until a Task ends it.
+// A coroutine can also make a transit to work on another task according to
+// the return value of the task function.
+// A coroutine can transit from one task to another until a task ends it.
 type Coroutine struct {
 	executor    *Executor
 	path        string
@@ -255,7 +255,7 @@ func (co *Coroutine) clearInners() {
 		switch v := inners[i]; {
 		case v.co != nil:
 			// v.co could have been ended and recycled.
-			// We need the following check to confirm that v.co is still an inner Coroutine of co.
+			// We need the following check to confirm that v.co is still an inner coroutine of co.
 			if v.co.outer == co {
 				v.co.end()
 			}
@@ -267,9 +267,9 @@ func (co *Coroutine) clearInners() {
 	clear(inners)
 }
 
-// Executor returns the [Executor] that spawned co.
+// Executor returns the executor that spawned co.
 //
-// Since co can be recycled by an Executor, it is recommended to save
+// Since co can be recycled by an executor, it is recommended to save
 // the return value in a variable first.
 func (co *Coroutine) Executor() *Executor {
 	return co.executor
@@ -277,13 +277,13 @@ func (co *Coroutine) Executor() *Executor {
 
 // Path returns the path of co.
 //
-// Since co can be recycled by an Executor, it is recommended to save
+// Since co can be recycled by an executor, it is recommended to save
 // the return value in a variable first.
 func (co *Coroutine) Path() string {
 	return co.path
 }
 
-// Watch watches some Events so that, when any of them notifies, co resumes.
+// Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
 	deps := co.deps
 	if deps == nil {
@@ -297,23 +297,23 @@ func (co *Coroutine) Watch(ev ...Event) {
 	}
 }
 
-// Cleanup adds a function call when co resumes or ends, or when co is
-// transiting to work on another [Task].
+// Cleanup adds a function call when co resumes or ends, or when co is making
+// a transit to work on another [Task].
 func (co *Coroutine) Cleanup(f func()) {
 	co.inners = append(co.inners, coroutineOrFunc{f: f})
 }
 
 // Defer adds a [Task] for execution when returning from a [Func].
-// Deferred Tasks are executed in last-in-first-out (LIFO) order.
+// Deferred tasks are executed in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, must(t))
 }
 
-// Spawn creates an inner [Coroutine] to work on t, using the result of
+// Spawn creates an inner coroutine to work on t, using the result of
 // path.Join(co.Path(), p) as its path.
 //
-// Inner Coroutines are ended automatically when the outer one resumes or
-// ends, or when the outer one is making a transit to work on another Task.
+// Inner coroutines are ended automatically when the outer one resumes or
+// ends, or when the outer one is making a transit to work on another task.
 func (co *Coroutine) Spawn(p string, t Task) {
 	inner := co.executor.newCoroutine().init(co.executor, path.Join(co.path, p), t).recyclable()
 	inner.run()
@@ -325,17 +325,15 @@ func (co *Coroutine) Spawn(p string, t Task) {
 }
 
 // Result is the type of the return value of a [Task] function.
-// A Result determines what next for a [Coroutine] to do after calling
-// a Task function.
+// A Result determines what next for a coroutine to do after running a task.
 //
-// A Result can be created by calling one of the following methods of
-// Coroutine:
-//   - [Coroutine.End]: for ending a Coroutine;
-//   - [Coroutine.Await]: for yielding a Coroutine with additional Events to
+// A Result can be created by calling one of the following methods:
+//   - [Coroutine.End]: for ending a coroutine;
+//   - [Coroutine.Await]: for yielding a coroutine with additional events to
 //     watch;
-//   - [Coroutine.Yield]: for yielding a Coroutine with another Task to which
+//   - [Coroutine.Yield]: for yielding a coroutine with another task to which
 //     will be transited later when resuming;
-//   - [Coroutine.Transit]: for transiting to another Task.
+//   - [Coroutine.Transit]: for transiting to another task.
 type Result struct {
 	action     int
 	label      Label      // used by: doBreak, doContinue
@@ -350,7 +348,7 @@ func (co *Coroutine) End() Result {
 }
 
 // Await returns a [Result] that will cause co to yield.
-// Await also accepts additional Events to watch.
+// Await also accepts additional events to watch.
 func (co *Coroutine) Await(ev ...Event) Result {
 	if len(ev) != 0 {
 		co.Watch(ev...)
@@ -397,7 +395,7 @@ func (co *Coroutine) Return() Result {
 }
 
 // Exit returns a [Result] that will cause co to exit.
-// All deferred Tasks will be run before co exits.
+// All deferred tasks will be run before co exits.
 func (co *Coroutine) Exit() Result {
 	return Result{action: doExit}
 }
@@ -406,9 +404,8 @@ type controller interface {
 	negotiate(co *Coroutine, res Result) Result
 }
 
-// A Task is a piece of work that a [Coroutine] is given to do when it is
-// spawned.
-// The return value of a Task, a [Result], determines what next for a Coroutine
+// A Task is a piece of work that a coroutine is given to do when it is spawned.
+// The return value of a task, a [Result], determines what next for a coroutine
 // to do.
 //
 // The argument co must not escape, because co can be recycled by an [Executor]
@@ -417,7 +414,7 @@ type Task func(co *Coroutine) Result
 
 // Then returns a [Task] that first works on t, then next after t ends.
 //
-// To chain multiple Tasks, use [Block] function.
+// To chain multiple tasks, use [Block] function.
 func (t Task) Then(next Task) Task {
 	return func(co *Coroutine) Result {
 		return Result{
@@ -458,7 +455,7 @@ func End() Task {
 	return (*Coroutine).End
 }
 
-// Await returns a [Task] that awaits some Events until any of them notifies,
+// Await returns a [Task] that awaits some events until any of them notifies,
 // and then ends.
 // If ev is empty, Await returns a [Task] that never ends.
 func Await(ev ...Event) Task {
@@ -470,8 +467,8 @@ func Await(ev ...Event) Task {
 	}
 }
 
-// Block returns a [Task] that runs each of the provided Tasks in sequence.
-// When one Task ends, Block runs another.
+// Block returns a [Task] that runs each of the given tasks in sequence.
+// When one task ends, Block runs another.
 func Block(s ...Task) Task {
 	switch len(s) {
 	case 0:
@@ -635,7 +632,7 @@ func (c *loopController) negotiate(co *Coroutine, res Result) Result {
 
 // Defer returns a [Task] that adds t for execution when returning from
 // a [Func].
-// Deferred Tasks are executed in last-in-first-out (LIFO) order.
+// Deferred tasks are executed in last-in-first-out (LIFO) order.
 func Defer(t Task) Task {
 	return func(co *Coroutine) Result {
 		co.Defer(t)
@@ -648,14 +645,14 @@ func Return() Task {
 	return (*Coroutine).Return
 }
 
-// Exit returns a [Task] that causes the Coroutine that runs it to exit.
-// All deferred Tasks are run before the Coroutine exits.
+// Exit returns a [Task] that causes the coroutine that runs it to exit.
+// All deferred tasks are run before the coroutine exits.
 func Exit() Task {
 	return (*Coroutine).Exit
 }
 
 // Func returns a [Task] that runs t in a function scope.
-// Spawned Tasks are considered surrounded by an invisible [Func].
+// Spawned tasks are considered surrounded by an invisible [Func].
 func Func(t Task) Task {
 	return func(co *Coroutine) Result {
 		return Result{

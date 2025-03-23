@@ -3,8 +3,8 @@ package async
 // A State is a [Signal] that carries a value.
 // To retrieve the value, call the Get method.
 //
-// Calling the Set method of a State, in a [Task] function, updates the value
-// and resumes any [Coroutine] that is watching the State.
+// Calling the Set method of a state, in a [Task] function, updates the value
+// and resumes any coroutine that is watching the state.
 //
 // A State must not be shared by more than one [Executor].
 type State[T any] struct {
@@ -25,7 +25,7 @@ func (s *State[T]) Get() T {
 	return s.value
 }
 
-// Set updates the value of s and resumes any [Coroutine] that is watching s.
+// Set updates the value of s and resumes any coroutine that is watching s.
 //
 // One should only call this method in a [Task] function.
 func (s *State[T]) Set(v T) {
@@ -33,7 +33,7 @@ func (s *State[T]) Set(v T) {
 	s.Notify()
 }
 
-// Update sets the value of s to f(s.Get()) and resumes any [Coroutine] that
+// Update sets the value of s to f(s.Get()) and resumes any coroutine that
 // is watching s.
 //
 // One should only call this method in a [Task] function.

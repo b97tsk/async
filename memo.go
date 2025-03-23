@@ -5,13 +5,13 @@ import "path"
 // A Memo is a State-like structure that carries a value that can only be set
 // in a Task-like function.
 //
-// A Memo is designed to have a value that is computed from other States.
-// What make a Memo useful are that:
-//   - A Memo can prevent unnecessary computations when it isn't used;
-//   - A Memo can prevent unnecessary propagations when its value isn't
+// A memo is designed to have a value that is computed from other states.
+// What make a memo useful are that:
+//   - A memo can prevent unnecessary computations when it isn't used;
+//   - A memo can prevent unnecessary propagations when its value isn't
 //     changed.
 //
-// To create a Memo, use [NewMemo] or [NewStrictMemo].
+// To create a memo, use [NewMemo] or [NewStrictMemo].
 //
 // A Memo must not be shared by more than one [Executor].
 type Memo[T any] struct {
@@ -22,24 +22,24 @@ type Memo[T any] struct {
 }
 
 // NewMemo returns a new non-strict [Memo].
-// The arguments are used to initialize an internal [Coroutine].
+// The arguments are used to initialize an internal coroutine.
 //
-// One must pass a function that watches some States, computes a value from
-// these States, and then updates the provided [State] if the value differs.
+// One must pass a function that watches some states, computes a value from
+// these states, and then updates the given state if the value differs.
 //
-// Like any [Event], a Memo can be watched by multiple Coroutines.
+// Like any [Event], a memo can be watched by multiple coroutines.
 // The watch list increases and decreases over time.
-// For a non-strict Memo, when the last Coroutine in the list unwatches it,
-// it does not immediately end its internal Coroutine.
-// Ending the internal Coroutine would only put the Memo into a stale state
-// because the Memo no longer detects dependency changes.
-// By not immediately ending the internal Coroutine, a non-strict Memo prevents
-// an extra computation when a new Coroutine watches it, provided that there
+// For a non-strict memo, when the last coroutine in the list unwatches it,
+// it does not immediately end its internal coroutine.
+// Ending the internal coroutine would only put the memo into a stale state
+// because the memo no longer detects dependency changes.
+// By not immediately ending the internal coroutine, a non-strict memo prevents
+// an extra computation when a new coroutine watches it, provided that there
 // are no dependency changes.
 //
-// On the other hand, a strict Memo immediately ends its internal Coroutine
-// whenever the last Coroutine in the watch list unwatches it. The Memo becomes
-// stale. The next time a new Coroutine watches it, it has to make a fresh
+// On the other hand, a strict memo immediately ends its internal coroutine
+// whenever the last coroutine in the watch list unwatches it. The memo becomes
+// stale. The next time a new coroutine watches it, it has to make a fresh
 // computation.
 func NewMemo[T any](e *Executor, p string, f func(co *Coroutine, s *State[T])) *Memo[T] {
 	return new(Memo[T]).init(e, p, f, false)

@@ -5,25 +5,25 @@ import (
 	"sync"
 )
 
-// An Executor is a [Coroutine] spawner, and a Coroutine runner.
+// An Executor is a coroutine spawner, and a coroutine runner.
 //
-// When a Coroutine is spawned or resumed, it is added into an internal queue.
+// When a coroutine is spawned or resumed, it is added into an internal queue.
 // The Run method then pops and runs each of them from the queue until
 // the queue is emptied.
 // It is done in a single-threaded manner.
-// If one Coroutine blocks, no other Coroutines can run.
+// If one coroutine blocks, no other coroutines can run.
 // The best practice is not to block.
 //
 // The internal queue is a priority queue.
 // Coroutines added in the queue are sorted by their paths.
 // Coroutines with the same path are sorted by their arrival order (FIFO).
-// Popping the queue removes the first Coroutine with the least path.
+// Popping the queue removes the first coroutine with the least path.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to
-// calling the Run method automatically whenever a Coroutine is spawned or
+// calling the Run method automatically whenever a coroutine is spawned or
 // resumed.
-// The Executor never calls the autorun function twice at the same time.
+// An executor never calls the autorun function twice at the same time.
 type Executor struct {
 	mu      sync.Mutex
 	pq      priorityqueue[*Coroutine]
@@ -34,7 +34,7 @@ type Executor struct {
 }
 
 // Autorun sets up an autorun function to calling the Run method automatically
-// whenever a [Coroutine] is spawned or resumed.
+// whenever a coroutine is spawned or resumed.
 //
 // One must pass a function that calls the Run method.
 //
@@ -46,7 +46,7 @@ func (e *Executor) Autorun(f func()) {
 	e.mu.Unlock()
 }
 
-// Run pops and runs every [Coroutine] in the queue until the queue is emptied.
+// Run pops and runs every coroutine in the queue until the queue is emptied.
 //
 // Run must not be called twice at the same time.
 func (e *Executor) Run() {
@@ -67,10 +67,10 @@ func (e *Executor) Run() {
 	pc.Rethrow()
 }
 
-// Spawn creates a [Coroutine] to work on t, using the result of path.Clean(p)
+// Spawn creates a coroutine to work on t, using the result of path.Clean(p)
 // as its path.
 //
-// The Coroutine is added in a queue. To run it, either call the Run method, or
+// The coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
 // Spawn is safe for concurrent use.

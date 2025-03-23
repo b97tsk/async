@@ -10,25 +10,25 @@ import (
 	"github.com/b97tsk/async"
 )
 
-// This example demonstrates how to spawn Tasks with different paths.
+// This example demonstrates how to spawn tasks with different paths.
 // The lower path, the higher priority.
-// This example creates a Task with path "aa" for additional computations
-// and another Task with path "zz" for printing results.
+// This example creates a task with path "aa" for additional computations
+// and another task with path "zz" for printing results.
 // The former runs before the latter because "aa" < "zz".
 func Example() {
-	// Create an Executor.
+	// Create an executor.
 	var myExecutor async.Executor
 
-	// Set up an autorun function to run an Executor automatically whenever a Coroutine is spawned or resumed.
+	// Set up an autorun function to run an executor automatically whenever a coroutine is spawned or resumed.
 	// The best practice is to pass a function that does not block. See Example (NonBlocking).
 	myExecutor.Autorun(myExecutor.Run)
 
-	// Create two States.
+	// Create two states.
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	// Although States can be created without the help of Executors,
-	// they might only be safe for use by one and only one Executor because of data races.
-	// Without proper synchronization, it's better only to spawn Coroutines to read or update States.
+	// Although states can be created without the help of executors,
+	// they might only be safe for use by one and only one executor because of data races.
+	// Without proper synchronization, it's better only to spawn coroutines to read or update states.
 
 	var sum, product async.State[int]
 
@@ -39,8 +39,8 @@ func Example() {
 		return co.Await() // Awaits signals or state changes.
 	})
 
-	// The above Task re-runs whenever s1 or s2 changes. As an example, this is fine.
-	// In practice, one should probably use Memos to avoid unnecessary recomputations. See Example (Memo).
+	// The above task re-runs whenever s1 or s2 changes. As an example, this is fine.
+	// In practice, one should probably use memos to avoid unnecessary recomputations. See Example (Memo).
 
 	op := async.NewState('+')
 
@@ -51,7 +51,7 @@ func Example() {
 
 		switch op.Get() {
 		case '+':
-			// The path of an inner Coroutine is relative to its outer one.
+			// The path of an inner coroutine is relative to its outer one.
 			co.Spawn("sum", func(co *async.Coroutine) async.Result { // The path of inner co is "zz/sum".
 				fmt.Println("s1 + s2 =", sum.Get())
 				return co.Await(&sum)
@@ -68,11 +68,11 @@ func Example() {
 
 	fmt.Println("--- SEPARATOR ---")
 
-	// The followings create several Tasks to mutate States.
+	// The followings create several tasks to mutate states.
 	// They share the same path, "/", which is lower than "aa" and "zz".
 	// Remember that, the lower path, the higher priority.
-	// Updating States should have higher priority, so that when there are multiple update Tasks,
-	// they can run together before any read Task.
+	// Updating states should have higher priority, so that when there are multiple update tasks,
+	// they can run together before any read task.
 	// This reduces the number of reads that have to react on update.
 
 	myExecutor.Spawn("/", async.Do(func() {
@@ -116,7 +116,7 @@ func Example() {
 	// s1 + s2 = 15
 }
 
-// This example demonstrates how to use Memos to memoize cheap computations.
+// This example demonstrates how to use memos to memoize cheap computations.
 // Memos are evaluated lazily. They take effect only when they are acquired.
 func Example_memo() {
 	var myExecutor async.Executor
@@ -206,7 +206,7 @@ func Example_memo() {
 }
 
 // This example demonstrates how to set up an autorun function to run
-// an Executor in a goroutine automatically whenever a Coroutine is spawned or
+// an executor in a goroutine automatically whenever a coroutine is spawned or
 // resumed.
 func Example_nonBlocking() {
 	var wg sync.WaitGroup // For keeping track of goroutines.
@@ -309,7 +309,7 @@ func Example_nonBlocking() {
 	// s1 + s2 = 15
 }
 
-// This example demonstrates how a Task can conditionally depend on a State.
+// This example demonstrates how a task can conditionally depend on a state.
 func Example_conditional() {
 	var myExecutor async.Executor
 
@@ -345,7 +345,7 @@ func Example_conditional() {
 	// 5
 }
 
-// This example demonstrates how a Memo can conditionally depend on a State.
+// This example demonstrates how a memo can conditionally depend on a state.
 func Example_conditionalMemo() {
 	var myExecutor async.Executor
 
@@ -386,9 +386,9 @@ func Example_conditionalMemo() {
 	// 5
 }
 
-// This example demonstrates how to end a Task.
-// It creates a Task that prints the value of a State whenever it changes.
-// The Task only prints 0, 1, 2 and 3 because it is ended after 3.
+// This example demonstrates how to end a task.
+// It creates a task that prints the value of a state whenever it changes.
+// The task only prints 0, 1, 2 and 3 because it is ended after 3.
 func Example_end() {
 	var myExecutor async.Executor
 
@@ -423,8 +423,8 @@ func Example_end() {
 	// 5
 }
 
-// This example demonstrates how to add a function call before a Task re-runs,
-// or after a Task ends.
+// This example demonstrates how to add a function call before a task re-runs,
+// or after a task ends.
 func Example_cleanup() {
 	var myExecutor async.Executor
 
@@ -459,7 +459,7 @@ func Example_cleanup() {
 	// 5
 }
 
-// This example demonstrates how a Coroutine can transit from one Task to
+// This example demonstrates how a coroutine can transit from one task to
 // another.
 func Example_switch() {
 	var myExecutor async.Executor
@@ -509,8 +509,8 @@ func Example_switch() {
 	// 7
 }
 
-// This example demonstrates how to run a Task after another.
-// To run multiple Tasks in sequence, use [async.Block] instead.
+// This example demonstrates how to run a task after another.
+// To run multiple tasks in sequence, use [async.Block] instead.
 func ExampleTask_Then() {
 	var myExecutor async.Executor
 
@@ -637,9 +637,9 @@ func ExampleAwait() {
 	// v1 + v2 = 42
 }
 
-// This example demonstrates how to run a block of Tasks.
-// A block can have zero or more Tasks.
-// A block runs Tasks in sequence.
+// This example demonstrates how to run a block of tasks.
+// A block can have zero or more tasks.
+// A block runs tasks in sequence.
 func ExampleBlock() {
 	var myExecutor async.Executor
 
@@ -764,7 +764,7 @@ func ExampleFunc() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned Tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
@@ -819,7 +819,7 @@ func ExampleFunc_exit() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned Tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
@@ -891,7 +891,7 @@ func ExampleFunc_panic() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned Tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
