@@ -27,6 +27,7 @@ import (
 type Executor struct {
 	mu      sync.Mutex
 	pq      priorityqueue[*Coroutine]
+	pc      paniccatcher
 	running bool
 	autorun func()
 	pool    sync.Pool
@@ -40,7 +41,9 @@ type Executor struct {
 // If f blocks, the Spawn method may block too.
 // The best practice is not to block.
 func (e *Executor) Autorun(f func()) {
+	e.mu.Lock()
 	e.autorun = f
+	e.mu.Unlock()
 }
 
 // Run pops and runs every [Coroutine] in the queue until the queue is emptied.
@@ -55,8 +58,13 @@ func (e *Executor) Run() {
 		e.runCoroutine(co)
 	}
 
+	pc := e.pc
+	e.pc.Reset()
+
 	e.running = false
 	e.mu.Unlock()
+
+	pc.Rethrow()
 }
 
 // Spawn creates a [Coroutine] to work on t, using the result of path.Clean(p)

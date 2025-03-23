@@ -140,12 +140,16 @@ func (co *Coroutine) run() {
 
 	var res Result
 
+	pc := &co.executor.pc
+
 	for {
 		co.clearInners()
 
 		co.flag &^= flagStale | flagEnded
 
-		res = co.task(co)
+		if !pc.TryCatch(func() { res = co.task(co) }) {
+			res = co.Exit()
+		}
 
 		if res.action != doYield && res.action != doTransit {
 			controllers := co.controllers
@@ -245,6 +249,8 @@ func (co *Coroutine) clearInners() {
 	inners := co.inners
 	co.inners = inners[:0]
 
+	pc := &co.executor.pc
+
 	for i := len(inners) - 1; i >= 0; i-- {
 		switch v := inners[i]; {
 		case v.co != nil:
@@ -254,7 +260,7 @@ func (co *Coroutine) clearInners() {
 				v.co.end()
 			}
 		case v.f != nil:
-			v.f()
+			pc.TryCatch(v.f)
 		}
 	}
 

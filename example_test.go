@@ -1,7 +1,9 @@
 package async_test
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -860,6 +862,79 @@ func ExampleFunc_exit() {
 	// 7
 	// defer 2
 	// defer 1
+	// 9
+}
+
+// This example demonstrates how async can handle panickings.
+func ExampleFunc_panic() {
+	dummyError := errors.New("dummy")
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			err, ok := v.(error)
+			if ok && errors.Is(err, dummyError) && strings.Contains(err.Error(), "dummy") {
+				// Note that use of strings.Contains(...) here is for coverage.
+				fmt.Println("recovered dummy error")
+				return
+			}
+			panic(v) // Repanic unexpected recovered value.
+		}()
+		myExecutor.Run()
+	})
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", async.Block(
+		async.Defer( // Note that spawned Tasks are considered surrounded by an invisible [Func].
+			async.Do(func() { fmt.Println("defer 1") }),
+		),
+		async.Func(async.Block( // A block in a function scope.
+			async.Defer(
+				async.Do(func() { fmt.Println("defer 2") }),
+			),
+			async.Loop(async.Block(
+				async.Await(&myState),
+				func(co *async.Coroutine) async.Result {
+					if v := myState.Get(); v%2 == 0 {
+						return co.Continue()
+					}
+					return co.End()
+				},
+				async.Do(func() {
+					fmt.Println(myState.Get())
+				}),
+				func(co *async.Coroutine) async.Result {
+					if v := myState.Get(); v >= 7 {
+						panic(dummyError) // Panic here.
+					}
+					return co.End()
+				},
+			)),
+			async.Do(func() { fmt.Println("after Loop") }), // Didn't run due to early panicking.
+		)),
+		async.Do(func() { fmt.Println("after Func") }), // Didn't run due to early panicking.
+	))
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// defer 2
+	// defer 1
+	// recovered dummy error
 	// 9
 }
 
