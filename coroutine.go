@@ -57,8 +57,6 @@ type coroutineOrFunc struct {
 	f  func()
 }
 
-type controller func(co *Coroutine, res Result) Result
-
 func (e *Executor) newCoroutine() *Coroutine {
 	if co := e.pool.Get(); co != nil {
 		return co.(*Coroutine)
@@ -153,7 +151,7 @@ func (co *Coroutine) run() {
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
-				res = controllers[i](co, res)
+				res = controllers[i].negotiate(co, res)
 				if res.action != doTransit {
 					controllers[i] = nil
 					controllers = controllers[:i]
@@ -164,7 +162,7 @@ func (co *Coroutine) run() {
 				}
 			}
 			if res.action != doTransit && res.action != doTailTransit {
-				res = rootController(co, res)
+				res = rootController.negotiate(co, res)
 			}
 			if res.action == doTailTransit {
 				res.action = doTransit
@@ -180,9 +178,24 @@ func (co *Coroutine) run() {
 		}
 
 		if res.controller != nil {
-			co.controllers = append(co.controllers, res.controller)
-			if maxCapSize := 1000000; cap(co.controllers) > maxCapSize {
-				panic("async: too many controllers or recursions")
+			addController := true
+			if _, ok := res.controller.(*funcController); ok {
+				lastController := rootController
+				if n := len(co.controllers); n != 0 {
+					lastController = co.controllers[n-1]
+				}
+				if _, ok := lastController.(*funcController); ok {
+					// Tail-call optimization:
+					// If the last controller is also a funcController, do not add another one.
+					// (doTailTransit also pays tribute to this optimization.)
+					addController = false
+				}
+			}
+			if addController {
+				co.controllers = append(co.controllers, res.controller)
+				if maxCapSize := 1000000; cap(co.controllers) > maxCapSize {
+					panic("async: too many controllers or recursions")
+				}
 			}
 		}
 
@@ -383,6 +396,10 @@ func (co *Coroutine) Exit() Result {
 	return Result{action: doExit}
 }
 
+type controller interface {
+	negotiate(co *Coroutine, res Result) Result
+}
+
 // A Task is a piece of work that a [Coroutine] is given to do when it is
 // spawned.
 // The return value of a Task, a [Result], determines what next for a Coroutine
@@ -400,19 +417,25 @@ func (t Task) Then(next Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: thenController(next),
+			controller: newThenController(next),
 		}
 	}
 }
 
-func thenController(t Task) controller {
-	return func(co *Coroutine, res Result) Result {
-		switch res.action {
-		case doEnd:
-			return Result{action: doTailTransit, transitTo: must(t)}
-		default:
-			return res
-		}
+type thenController struct {
+	next Task
+}
+
+func newThenController(next Task) controller {
+	return &thenController{must(next)}
+}
+
+func (c *thenController) negotiate(co *Coroutine, res Result) Result {
+	switch res.action {
+	case doEnd:
+		return Result{action: doTailTransit, transitTo: c.next}
+	default:
+		return res
 	}
 }
 
@@ -456,28 +479,34 @@ func Block(s ...Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(s[0]),
-			controller: blockController(s[1:]),
+			controller: newBlockController(s[1:]),
 		}
 	}
 }
 
-func blockController(s []Task) controller {
-	return func(co *Coroutine, res Result) Result {
-		switch res.action {
-		case doEnd:
-			if len(s) == 0 {
-				return co.End()
-			}
-			t := s[0]
-			s = s[1:]
-			action := doTransit
-			if len(s) == 0 {
-				action = doTailTransit
-			}
-			return Result{action: action, transitTo: must(t)}
-		default:
-			return res
+type blockController struct {
+	s []Task
+}
+
+func newBlockController(s []Task) controller {
+	return &blockController{s}
+}
+
+func (c *blockController) negotiate(co *Coroutine, res Result) Result {
+	switch res.action {
+	case doEnd:
+		if len(c.s) == 0 {
+			return co.End()
 		}
+		t := c.s[0]
+		c.s = c.s[1:]
+		action := doTransit
+		if len(c.s) == 0 {
+			action = doTailTransit
+		}
+		return Result{action: action, transitTo: must(t)}
+	default:
+		return res
 	}
 }
 
@@ -537,7 +566,7 @@ func LoopLabel(l Label, t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: loopController(l, t),
+			controller: newLoopController(l, t),
 		}
 	}
 }
@@ -563,31 +592,38 @@ func LoopLabelN(l Label, n int, t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  u,
-			controller: loopController(l, u),
+			controller: newLoopController(l, u),
 		}
 	}
 }
 
-func loopController(l Label, t Task) controller {
-	return func(co *Coroutine, res Result) Result {
-		switch res.action {
-		case doEnd:
-			return co.Transit(t)
-		case doBreak:
-			switch res.label {
-			case l, NoLabel:
-				return co.End()
-			}
-			return res
-		case doContinue:
-			switch res.label {
-			case l, NoLabel:
-				return co.Transit(t)
-			}
-			return res
-		default:
-			return res
+type loopController struct {
+	l Label
+	t Task
+}
+
+func newLoopController(l Label, t Task) controller {
+	return &loopController{l, t}
+}
+
+func (c *loopController) negotiate(co *Coroutine, res Result) Result {
+	switch res.action {
+	case doEnd:
+		return co.Transit(c.t)
+	case doBreak:
+		switch res.label {
+		case c.l, NoLabel:
+			return co.End()
 		}
+		return res
+	case doContinue:
+		switch res.label {
+		case c.l, NoLabel:
+			return co.Transit(c.t)
+		}
+		return res
+	default:
+		return res
 	}
 }
 
@@ -619,38 +655,44 @@ func Func(t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: funcController(len(co.defers)),
+			controller: newFuncController(len(co.defers)),
 		}
 	}
 }
 
-func funcController(keep int) controller {
-	var exitInstead bool
-	return func(co *Coroutine, res Result) Result {
-		switch res.action {
-		case doExit:
-			exitInstead = true
-			fallthrough
-		case doEnd, doReturn:
-			defers := co.defers
-			if len(defers) == keep {
-				if exitInstead {
-					return co.Exit()
-				}
-				return co.End()
+type funcController struct {
+	keep int
+	exit bool
+}
+
+func newFuncController(keep int) controller {
+	return &funcController{keep: keep}
+}
+
+func (c *funcController) negotiate(co *Coroutine, res Result) Result {
+	switch res.action {
+	case doExit:
+		c.exit = true
+		fallthrough
+	case doEnd, doReturn:
+		defers := co.defers
+		if len(defers) == c.keep {
+			if c.exit {
+				return co.Exit()
 			}
-			i := len(defers) - 1
-			t := defers[i]
-			defers[i] = nil
-			co.defers = defers[:i]
-			return co.Transit(t)
-		case doBreak:
-			panic("async: unhandled break action")
-		case doContinue:
-			panic("async: unhandled continue action")
-		default:
-			panic("async: unknown action (internal error)")
+			return co.End()
 		}
+		i := len(defers) - 1
+		t := defers[i]
+		defers[i] = nil
+		co.defers = defers[:i]
+		return co.Transit(t)
+	case doBreak:
+		panic("async: unhandled break action")
+	case doContinue:
+		panic("async: unhandled continue action")
+	default:
+		panic("async: unknown action (internal error)")
 	}
 }
 
@@ -661,4 +703,4 @@ func must(t Task) Task {
 	return t
 }
 
-var rootController = funcController(0)
+var rootController = newFuncController(0)

@@ -862,3 +862,58 @@ func ExampleFunc_exit() {
 	// defer 1
 	// 9
 }
+
+// This example demonstrates how to make tail-calls in an [async.Func].
+// Tail-calls are not recommended and should be avoided when possible.
+// Without tail-call optimization, this example panics.
+// To run this example, add an output comment at the end.
+func ExampleFunc_tailcall() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	myExecutor.Spawn("#1", func(co *async.Coroutine) async.Result {
+		var n int
+
+		var t async.Task
+
+		t = async.Func(async.Block(
+			async.End(),
+			async.End(),
+			async.End(),
+			func(co *async.Coroutine) async.Result { // Last task in the block.
+				if n < 5000000 {
+					n++
+					return co.Transit(t) // Tail-call here.
+				}
+				return co.End()
+			},
+		))
+
+		return co.Transit(t)
+	})
+
+	myExecutor.Spawn("#2", func(co *async.Coroutine) async.Result {
+		var n int
+
+		var t async.Task
+
+		t = async.Func(async.Block(
+			func(co *async.Coroutine) async.Result {
+				if n < 5000000 {
+					n++
+					co.Defer(t)        // Tail-call here (workaround).
+					return co.Return() // Early return.
+				}
+				return co.End()
+			},
+			async.End(),
+			async.End(),
+			async.End(),
+		))
+
+		return co.Transit(t)
+	})
+
+	// To run this example, add an output comment here.
+}
