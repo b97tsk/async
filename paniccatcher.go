@@ -2,28 +2,22 @@ package async
 
 import (
 	"fmt"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync/atomic"
 )
 
 type paniccatcher struct {
-	items  []panicitem
-	goexit bool
+	items []panicitem
 }
 
 func (pc *paniccatcher) Reset() {
 	pc.items = nil
-	pc.goexit = false
 }
 
 func (pc *paniccatcher) Rethrow() {
 	if len(pc.items) != 0 {
 		panic(&panicvalue{items: pc.items})
-	}
-	if pc.goexit {
-		runtime.Goexit()
 	}
 }
 
@@ -33,7 +27,7 @@ func (pc *paniccatcher) TryCatch(f func()) (ok bool) {
 			if v := recover(); v != nil {
 				pc.items = append(pc.items, panicitem{v, debug.Stack()})
 			} else {
-				pc.goexit = true
+				panic("async: async does not support runtime.Goexit()")
 			}
 		}
 	}()
