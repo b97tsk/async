@@ -764,7 +764,7 @@ func ExampleFunc() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
@@ -819,7 +819,7 @@ func ExampleFunc_exit() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
@@ -879,7 +879,7 @@ func ExampleFunc_panic() {
 			}
 			err, ok := v.(error)
 			if ok && errors.Is(err, dummyError) && strings.Contains(err.Error(), "dummy") {
-				// Note that use of strings.Contains(...) here is for coverage.
+				// Use of strings.Contains(...) here is for code coverage, not that it is necessary.
 				fmt.Println("recovered dummy error")
 				return
 			}
@@ -891,7 +891,7 @@ func ExampleFunc_panic() {
 	var myState async.State[int]
 
 	myExecutor.Spawn("zz", async.Block(
-		async.Defer( // Note that spawned tasks are considered surrounded by an invisible [Func].
+		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
 		async.Func(async.Block( // A block in a function scope.
@@ -940,8 +940,7 @@ func ExampleFunc_panic() {
 
 // This example demonstrates how to make tail-calls in an [async.Func].
 // Tail-calls are not recommended and should be avoided when possible.
-// Without tail-call optimization, this example panics.
-// To run this example, add an output comment at the end.
+// Without tail-call optimization, this example shall panic.
 func ExampleFunc_tailcall() {
 	var myExecutor async.Executor
 
@@ -957,7 +956,7 @@ func ExampleFunc_tailcall() {
 			async.End(),
 			async.End(),
 			func(co *async.Coroutine) async.Result { // Last task in the block.
-				if n < 5000000 {
+				if n < 2000000 {
 					n++
 					return co.Transit(t) // Tail-call here.
 				}
@@ -965,7 +964,7 @@ func ExampleFunc_tailcall() {
 			},
 		))
 
-		return co.Transit(t)
+		return co.Transit(t.Then(async.Do(func() { fmt.Println(n) })))
 	})
 
 	myExecutor.Spawn("#2", func(co *async.Coroutine) async.Result {
@@ -975,7 +974,7 @@ func ExampleFunc_tailcall() {
 
 		t = async.Func(async.Block(
 			func(co *async.Coroutine) async.Result {
-				if n < 5000000 {
+				if n < 2000000 {
 					n++
 					co.Defer(t)        // Tail-call here (workaround).
 					return co.Return() // Early return.
@@ -987,8 +986,10 @@ func ExampleFunc_tailcall() {
 			async.End(),
 		))
 
-		return co.Transit(t)
+		return co.Transit(t.Then(async.Do(func() { fmt.Println(n) })))
 	})
 
-	// To run this example, add an output comment here.
+	// Output:
+	// 2000000
+	// 2000000
 }

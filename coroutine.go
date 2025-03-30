@@ -19,6 +19,7 @@ const (
 	flagEnded
 	flagRecyclable
 	flagRecycled
+	flagExit
 )
 
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
@@ -187,12 +188,12 @@ func (co *Coroutine) run() {
 
 		if res.controller != nil {
 			addController := true
-			if _, ok := res.controller.(*funcController); ok {
+			if _, ok := res.controller.(funcController); ok {
 				lastController := rootController
 				if n := len(co.controllers); n != 0 {
 					lastController = co.controllers[n-1]
 				}
-				if _, ok := lastController.(*funcController); ok {
+				if _, ok := lastController.(funcController); ok {
 					// Tail-call optimization:
 					// If the last controller is also a funcController, do not add another one.
 					// (doTailTransit also pays tribute to this optimization.)
@@ -664,29 +665,25 @@ func Func(t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: newFuncController(len(co.defers)),
+			controller: funcController(len(co.defers)),
 		}
 	}
 }
 
-type funcController struct {
-	keep int
-	exit bool
-}
+// Note that funcController must be stateless, because rootController,
+// as a funcController, might be shared by multiple coroutines run by
+// different executors.
+type funcController int
 
-func newFuncController(keep int) controller {
-	return &funcController{keep: keep}
-}
-
-func (c *funcController) negotiate(co *Coroutine, res Result) Result {
+func (c funcController) negotiate(co *Coroutine, res Result) Result {
 	switch res.action {
 	case doExit:
-		c.exit = true
+		co.flag |= flagExit
 		fallthrough
 	case doEnd, doReturn:
 		defers := co.defers
-		if len(defers) == c.keep {
-			if c.exit {
+		if len(defers) == int(c) {
+			if co.flag&flagExit != 0 {
 				return co.Exit()
 			}
 			return co.End()
@@ -712,4 +709,4 @@ func must(t Task) Task {
 	return t
 }
 
-var rootController = newFuncController(0)
+var rootController controller = funcController(0)
