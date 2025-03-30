@@ -340,7 +340,13 @@ func (co *Coroutine) Spawn(p string, t Task) {
 //     watch;
 //   - [Coroutine.Yield]: for yielding a coroutine with another task to which
 //     will be transited later when resuming;
-//   - [Coroutine.Transit]: for transiting to another task.
+//   - [Coroutine.Transit]: for transiting to another task;
+//   - [Coroutine.Break]: for breaking a loop;
+//   - [Coroutine.BreakLabel]: for breaking a loop with a specific label;
+//   - [Coroutine.Continue]: for continuing a loop;
+//   - [Coroutine.ContinueLabel]: for continuing a loop with a specific label;
+//   - [Coroutine.Return]: for returning from a [Func];
+//   - [Coroutine.Exit]: for exiting a coroutine.
 type Result struct {
 	action     int
 	label      Label      // used by: doBreak, doContinue
