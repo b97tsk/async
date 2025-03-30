@@ -155,7 +155,9 @@ func (co *Coroutine) run() {
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
-				res = controllers[i].negotiate(co, res)
+				if !pc.TryCatch(func() { res = controllers[i].negotiate(co, res) }) {
+					res = co.Exit()
+				}
 				if res.action != doTransit {
 					controllers[i] = nil
 					controllers = controllers[:i]
@@ -166,7 +168,9 @@ func (co *Coroutine) run() {
 				}
 			}
 			if res.action != doTransit && res.action != doTailTransit {
-				res = rootController.negotiate(co, res)
+				if !pc.TryCatch(func() { res = rootController.negotiate(co, res) }) {
+					res = co.Exit()
+				}
 			}
 			if res.action == doTailTransit {
 				res.action = doTransit
@@ -197,8 +201,10 @@ func (co *Coroutine) run() {
 			}
 			if addController {
 				co.controllers = append(co.controllers, res.controller)
-				if maxCapSize := 1000000; cap(co.controllers) > maxCapSize {
-					panic("async: too many controllers or recursions")
+				if capSizeLimit := 1000000; cap(co.controllers) > capSizeLimit {
+					co.task = func(co *Coroutine) Result {
+						panic("async: too many controllers or recursions")
+					}
 				}
 			}
 		}
