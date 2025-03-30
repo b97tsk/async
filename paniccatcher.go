@@ -49,7 +49,7 @@ func (pv *panicvalue) Error() string {
 	var b strings.Builder
 	b.WriteString("as follows:")
 	for i, p := range pv.items {
-		b.WriteString(fmt.Sprintf("\n(%d/%d) panic: %v\n\n", i+1, len(pv.items), p.value))
+		fmt.Fprintf(&b, "\n(%d/%d) panic: %v\n\n", i+1, len(pv.items), p.value)
 		b.Write(p.stack)
 	}
 	return b.String()
