@@ -19,7 +19,7 @@ const (
 	flagEnded
 	flagRecyclable
 	flagRecycled
-	flagExit
+	flagExiting
 )
 
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
@@ -156,8 +156,9 @@ func (co *Coroutine) run() {
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
-				if !pc.TryCatch(func() { res = controllers[i].negotiate(co, res) }) {
-					res = co.Exit()
+				c := controllers[i]
+				if !pc.TryCatch(func() { res = c.negotiate(co, res) }) {
+					res = c.negotiate(co, co.Exit())
 				}
 				if res.action != doTransit {
 					controllers[i] = nil
@@ -170,7 +171,7 @@ func (co *Coroutine) run() {
 			}
 			if res.action != doTransit && res.action != doTailTransit {
 				if !pc.TryCatch(func() { res = rootController.negotiate(co, res) }) {
-					res = co.Exit()
+					res = rootController.negotiate(co, co.Exit())
 				}
 			}
 			if res.action == doTailTransit {
@@ -239,6 +240,14 @@ func (co *Coroutine) end() {
 	co.clearDeps()
 	co.clearInners()
 
+	if len(co.defers) != 0 {
+		panic("async: not all deferred tasks are handled (internal error)")
+	}
+
+	if len(co.controllers) != 0 {
+		panic("async: not all controllers are handled (internal error)")
+	}
+
 	if co.flag&flagResumed == 0 {
 		co.executor.freeCoroutine(co)
 	}
@@ -264,7 +273,10 @@ func (co *Coroutine) clearInners() {
 			// v.co could have been ended and recycled.
 			// We need the following check to confirm that v.co is still an inner coroutine of co.
 			if v.co.outer == co {
-				v.co.end()
+				if v.co.flag&flagEnded == 0 {
+					v.co.task = Exit()
+					v.co.run()
+				}
 			}
 		case v.f != nil:
 			pc.TryCatch(v.f)
@@ -335,7 +347,7 @@ func (co *Coroutine) Spawn(p string, t Task) {
 // A Result determines what next for a coroutine to do after running a task.
 //
 // A Result can be created by calling one of the following methods:
-//   - [Coroutine.End]: for ending a coroutine;
+//   - [Coroutine.End]: for ending a coroutine or transiting to another task;
 //   - [Coroutine.Await]: for yielding a coroutine with additional events to
 //     watch;
 //   - [Coroutine.Yield]: for yielding a coroutine with another task to which
@@ -347,6 +359,10 @@ func (co *Coroutine) Spawn(p string, t Task) {
 //   - [Coroutine.ContinueLabel]: for continuing a loop with a specific label;
 //   - [Coroutine.Return]: for returning from a [Func];
 //   - [Coroutine.Exit]: for exiting a coroutine.
+//
+// These methods may have side effects. One should never store a Result in
+// a variable and overwrite it with another, before returning it. Instead,
+// one should just return a Result right after it is created.
 type Result struct {
 	action     int
 	label      Label      // used by: doBreak, doContinue
@@ -362,7 +378,13 @@ func (co *Coroutine) End() Result {
 
 // Await returns a [Result] that will cause co to yield.
 // Await also accepts additional events to watch.
+//
+// Yielding is not allowed when a coroutine is exiting.
+// If co is exiting, Await panics.
 func (co *Coroutine) Await(ev ...Event) Result {
+	if co.flag&flagExiting != 0 {
+		panic("async: yielding while exiting")
+	}
 	if len(ev) != 0 {
 		co.Watch(ev...)
 	}
@@ -371,7 +393,13 @@ func (co *Coroutine) Await(ev ...Event) Result {
 
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
 // make a transit to work on t instead.
+//
+// Yielding is not allowed when a coroutine is exiting.
+// If co is exiting, Yield panics.
 func (co *Coroutine) Yield(t Task) Result {
+	if co.flag&flagExiting != 0 {
+		panic("async: yielding while exiting")
+	}
 	return Result{action: doYield, transitTo: must(t)}
 }
 
@@ -410,6 +438,7 @@ func (co *Coroutine) Return() Result {
 // Exit returns a [Result] that will cause co to exit.
 // All deferred tasks will be run before co exits.
 func (co *Coroutine) Exit() Result {
+	co.flag |= flagExiting
 	return Result{action: doExit}
 }
 
@@ -683,13 +712,10 @@ type funcController int
 
 func (c funcController) negotiate(co *Coroutine, res Result) Result {
 	switch res.action {
-	case doExit:
-		co.flag |= flagExit
-		fallthrough
-	case doEnd, doReturn:
+	case doEnd, doReturn, doExit:
 		defers := co.defers
 		if len(defers) == int(c) {
-			if co.flag&flagExit != 0 {
+			if co.flag&flagExiting != 0 {
 				return co.Exit()
 			}
 			return co.End()
