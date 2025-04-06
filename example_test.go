@@ -993,3 +993,39 @@ func ExampleFunc_tailcall() {
 	// 2000000
 	// 2000000
 }
+
+func ExampleFromSeq() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn("zz", async.FromSeq(
+		func(yield func(async.Task) bool) {
+			await := async.Await(&myState)
+			for yield(await) {
+				v := myState.Get()
+				if v%2 != 0 {
+					fmt.Println(v)
+				}
+				if v >= 7 {
+					return
+				}
+			}
+		},
+	))
+
+	for i := 1; i <= 9; i++ {
+		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 9.
+
+	// Output:
+	// 1
+	// 3
+	// 5
+	// 7
+	// 9
+}

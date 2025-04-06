@@ -1,6 +1,9 @@
 package async
 
-import "path"
+import (
+	"iter"
+	"path"
+)
 
 const (
 	doEnd = iota
@@ -161,6 +164,9 @@ func (co *Coroutine) run() {
 					res = c.negotiate(co, co.Exit())
 				}
 				if res.action != doTransit {
+					if c, ok := c.(cleanup); ok {
+						c.cleanup()
+					}
 					controllers[i] = nil
 					controllers = controllers[:i]
 					co.controllers = controllers
@@ -448,6 +454,10 @@ type controller interface {
 	negotiate(co *Coroutine, res Result) Result
 }
 
+type cleanup interface {
+	cleanup()
+}
+
 // A Task is a piece of work that a coroutine is given to do when it is spawned.
 // The return value of a task, a [Result], determines what next for a coroutine
 // to do.
@@ -464,17 +474,13 @@ func (t Task) Then(next Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: newThenController(next),
+			controller: &thenController{must(next)},
 		}
 	}
 }
 
 type thenController struct {
 	next Task
-}
-
-func newThenController(next Task) controller {
-	return &thenController{must(next)}
 }
 
 func (c *thenController) negotiate(co *Coroutine, res Result) Result {
@@ -524,17 +530,13 @@ func Block(s ...Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(s[0]),
-			controller: newBlockController(s[1:]),
+			controller: &blockController{s[1:]},
 		}
 	}
 }
 
 type blockController struct {
 	s []Task
-}
-
-func newBlockController(s []Task) controller {
-	return &blockController{s}
 }
 
 func (c *blockController) negotiate(co *Coroutine, res Result) Result {
@@ -611,7 +613,7 @@ func LoopLabel(l Label, t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  must(t),
-			controller: newLoopController(l, t),
+			controller: &loopController{l, t},
 		}
 	}
 }
@@ -637,7 +639,7 @@ func LoopLabelN(l Label, n int, t Task) Task {
 		return Result{
 			action:     doTransit,
 			transitTo:  u,
-			controller: newLoopController(l, u),
+			controller: &loopController{l, u},
 		}
 	}
 }
@@ -645,10 +647,6 @@ func LoopLabelN(l Label, n int, t Task) Task {
 type loopController struct {
 	l Label
 	t Task
-}
-
-func newLoopController(l Label, t Task) controller {
-	return &loopController{l, t}
 }
 
 func (c *loopController) negotiate(co *Coroutine, res Result) Result {
@@ -742,3 +740,33 @@ func must(t Task) Task {
 }
 
 var rootController controller = funcController(0)
+
+// FromSeq returns a [Task] that runs each of the tasks from seq in sequence.
+func FromSeq(seq iter.Seq[Task]) Task {
+	return func(co *Coroutine) Result {
+		next, stop := iter.Pull(seq)
+		return Result{
+			action:     doTransit,
+			transitTo:  End(),
+			controller: &seqController{next, stop},
+		}
+	}
+}
+
+type seqController struct {
+	next func() (Task, bool)
+	stop func()
+}
+
+func (c *seqController) negotiate(co *Coroutine, res Result) Result {
+	if res.action == doEnd {
+		if t, ok := c.next(); ok {
+			return co.Transit(t)
+		}
+	}
+	return res
+}
+
+func (c *seqController) cleanup() {
+	c.stop()
+}
