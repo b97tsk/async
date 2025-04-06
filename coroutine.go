@@ -302,15 +302,19 @@ func (co *Coroutine) Path() string {
 	return co.path
 }
 
+// Exiting reports whether co is exiting.
+func (co *Coroutine) Exiting() bool {
+	return co.flag&flagExiting != 0
+}
+
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
 	deps := co.deps
-	if deps == nil {
-		deps = make(map[Event]bool)
-		co.deps = deps
-	}
-
 	for _, d := range ev {
+		if deps == nil {
+			deps = make(map[Event]bool)
+			co.deps = deps
+		}
 		deps[d] = true
 		d.addListener(co)
 	}
@@ -382,12 +386,10 @@ func (co *Coroutine) End() Result {
 // Yielding is not allowed when a coroutine is exiting.
 // If co is exiting, Await panics.
 func (co *Coroutine) Await(ev ...Event) Result {
-	if co.flag&flagExiting != 0 {
+	if co.Exiting() {
 		panic("async: yielding while exiting")
 	}
-	if len(ev) != 0 {
-		co.Watch(ev...)
-	}
+	co.Watch(ev...)
 	return Result{action: doYield}
 }
 
@@ -397,7 +399,7 @@ func (co *Coroutine) Await(ev ...Event) Result {
 // Yielding is not allowed when a coroutine is exiting.
 // If co is exiting, Yield panics.
 func (co *Coroutine) Yield(t Task) Result {
-	if co.flag&flagExiting != 0 {
+	if co.Exiting() {
 		panic("async: yielding while exiting")
 	}
 	return Result{action: doYield, transitTo: must(t)}
@@ -502,9 +504,7 @@ func End() Task {
 // If ev is empty, Await returns a [Task] that never ends.
 func Await(ev ...Event) Task {
 	return func(co *Coroutine) Result {
-		if len(ev) != 0 {
-			co.Watch(ev...)
-		}
+		co.Watch(ev...)
 		return co.Yield(End())
 	}
 }
@@ -715,7 +715,7 @@ func (c funcController) negotiate(co *Coroutine, res Result) Result {
 	case doEnd, doReturn, doExit:
 		defers := co.defers
 		if len(defers) == int(c) {
-			if co.flag&flagExiting != 0 {
+			if co.Exiting() {
 				return co.Exit()
 			}
 			return co.End()
