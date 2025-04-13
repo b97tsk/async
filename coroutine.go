@@ -231,7 +231,7 @@ func (co *Coroutine) run() {
 		}
 	}
 
-	if res.action != doYield || len(co.deps) == 0 && len(co.inners) == 0 {
+	if res.action != doYield {
 		co.end()
 	}
 }
