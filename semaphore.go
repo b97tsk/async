@@ -39,6 +39,9 @@ func (s *Semaphore) Acquire(n int64) Task {
 			}
 			w := &waiter{n: n}
 			s.waiters = append(s.waiters, w)
+			co.Cleanup(func() {
+				w.n = 0 // Nullify w in case co is exiting.
+			})
 			co.Watch(w)
 			return co.Yield(End())
 		}
