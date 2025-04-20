@@ -4,6 +4,7 @@ import (
 	"iter"
 	"path"
 	"slices"
+	"weak"
 )
 
 const (
@@ -55,6 +56,11 @@ type Coroutine struct {
 	cleanups    []Cleanup
 	defers      []Task
 	controllers []controller
+	cache       map[any]cacheEntry
+}
+
+type cacheEntry interface {
+	isDead() bool
 }
 
 func (e *Executor) newCoroutine() *Coroutine {
@@ -69,7 +75,19 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		co.flag |= flagRecycled
 		co.executor = nil
 		co.task = nil
-		e.pool.Put(co)
+		if len(co.cache) != 0 {
+			go func() {
+				m := co.cache
+				for k, v := range m {
+					if v.isDead() {
+						delete(m, k)
+					}
+				}
+				e.pool.Put(co)
+			}()
+		} else {
+			e.pool.Put(co)
+		}
 	}
 }
 
@@ -851,4 +869,36 @@ func (c *seqController) negotiate(co *Coroutine, res Result) Result {
 
 func (c *seqController) Cleanup() {
 	c.stop()
+}
+
+func keyFor[T any]() any {
+	type key struct{}
+	return key{}
+}
+
+func newFor[T any]() func() *T {
+	return func() *T { return new(T) }
+}
+
+type weakPointer[T any] struct {
+	weak.Pointer[T]
+}
+
+func (p weakPointer[T]) isDead() bool {
+	return p.Value() == nil
+}
+
+func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
+	cache := co.cache
+	if cache == nil {
+		cache = make(map[any]cacheEntry)
+		co.cache = cache
+	}
+	wp, _ := cache[key].(weakPointer[T])
+	v := wp.Value()
+	if v == nil && new != nil {
+		v = new()
+		cache[key] = weakPointer[T]{weak.Make(v)}
+	}
+	return v
 }

@@ -32,7 +32,8 @@ func (s *Semaphore) Acquire(n int64) Task {
 			if n > s.size {
 				return co.Await() // Impossible to success.
 			}
-			w := &waiter{n: n}
+			w := cacheFor[waiter](co, keyFor[waiter](), newFor[waiter]())
+			w.s, w.n = s, n
 			s.waiters = append(s.waiters, w)
 			co.Cleanup(w)
 			co.Watch(w)
@@ -67,6 +68,7 @@ func (s *Semaphore) notifyWaiters() {
 			break
 		}
 		s.cur += w.n
+		w.n = 0
 		w.Notify()
 	}
 	s.waiters = slices.Delete(s.waiters, 0, i)
@@ -74,9 +76,19 @@ func (s *Semaphore) notifyWaiters() {
 
 type waiter struct {
 	Signal
+	s *Semaphore
 	n int64
 }
 
 func (w *waiter) Cleanup() {
-	w.n = 0
+	if w.n != 0 {
+		w.s.removeWaiter(w)
+	}
+	w.s = nil
+}
+
+func (s *Semaphore) removeWaiter(w *waiter) {
+	if i := slices.Index(s.waiters, w); i != -1 {
+		s.waiters = slices.Delete(s.waiters, i, i+1)
+	}
 }
