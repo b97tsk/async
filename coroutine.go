@@ -696,7 +696,7 @@ func Loop(t Task) Task {
 // for n times.
 // Both [Coroutine.Break] and [Break] can break this loop early.
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
-func LoopN(n int, t Task) Task {
+func LoopN[Int intType](n Int, t Task) Task {
 	return LoopLabelN(NoLabel, n, t)
 }
 
@@ -726,9 +726,9 @@ func LoopLabel(l Label, t Task) Task {
 // break this loop early.
 // Both [Coroutine.ContinueLabel] and [ContinueLabel], with label l, can
 // continue this loop early.
-func LoopLabelN(l Label, n int, t Task) Task {
+func LoopLabelN[Int intType](l Label, n Int, t Task) Task {
 	return func(co *Coroutine) Result {
-		i := 0
+		i := Int(0)
 		u := func(co *Coroutine) Result {
 			if i < n {
 				i++
@@ -742,6 +742,11 @@ func LoopLabelN(l Label, n int, t Task) Task {
 			controller: &loopController{l, u},
 		}
 	}
+}
+
+type intType interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
 }
 
 type loopController struct {
