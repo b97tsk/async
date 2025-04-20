@@ -24,11 +24,11 @@ func (pc *paniccatcher) Rethrow() {
 func (pc *paniccatcher) TryCatch(f func()) (ok bool) {
 	defer func() {
 		if !ok {
-			if v := recover(); v != nil {
-				pc.items = append(pc.items, panicitem{v, debug.Stack()})
-			} else {
+			v := recover()
+			if v == nil {
 				panic("async: async does not support runtime.Goexit()")
 			}
+			pc.items = append(pc.items, panicitem{v, debug.Stack()})
 		}
 	}()
 	f()
