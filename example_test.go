@@ -425,7 +425,7 @@ func Example_end() {
 
 // This example demonstrates how to add a function call before a task re-runs,
 // or after a task ends.
-func Example_cleanup() {
+func Example_cleanupFunc() {
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
@@ -436,7 +436,7 @@ func Example_cleanup() {
 		co.Watch(&myState)
 
 		v := myState.Get()
-		co.Cleanup(func() { fmt.Println(v, myState.Get()) })
+		co.CleanupFunc(func() { fmt.Println(v, myState.Get()) })
 
 		if v < 3 {
 			return co.Await()

@@ -3,6 +3,7 @@ package async
 import (
 	"iter"
 	"path"
+	"slices"
 )
 
 const (
@@ -45,20 +46,15 @@ const (
 // the return value of the task function.
 // A coroutine can transit from one task to another until a task ends it.
 type Coroutine struct {
+	flag        uint8
+	outer       *Coroutine
 	executor    *Executor
 	path        string
 	task        Task
-	flag        uint8
 	deps        map[Event]bool
-	inners      []coroutineOrFunc
-	outer       *Coroutine
+	cleanups    []Cleanup
 	defers      []Task
 	controllers []controller
-}
-
-type coroutineOrFunc struct {
-	co *Coroutine
-	f  func()
 }
 
 func (e *Executor) newCoroutine() *Coroutine {
@@ -70,19 +66,18 @@ func (e *Executor) newCoroutine() *Coroutine {
 
 func (e *Executor) freeCoroutine(co *Coroutine) {
 	if co.flag&(flagRecyclable|flagRecycled) == flagRecyclable {
+		co.flag |= flagRecycled
 		co.executor = nil
 		co.task = nil
-		co.flag |= flagRecycled
-		co.outer = nil
 		e.pool.Put(co)
 	}
 }
 
 func (co *Coroutine) init(e *Executor, p string, t Task) *Coroutine {
+	co.flag = flagStale
 	co.executor = e
 	co.path = p
 	co.task = t
-	co.flag = flagStale
 	return co
 }
 
@@ -147,7 +142,7 @@ func (co *Coroutine) run() {
 	pc := &co.executor.pc
 
 	for {
-		co.clearInners()
+		co.clearCleanups()
 
 		co.flag &^= flagStale | flagEnded
 
@@ -164,8 +159,8 @@ func (co *Coroutine) run() {
 					res = c.negotiate(co, co.Exit())
 				}
 				if res.action != doTransit {
-					if c, ok := c.(cleanup); ok {
-						c.cleanup()
+					if c, ok := c.(Cleanup); ok {
+						c.Cleanup()
 					}
 					controllers[i] = nil
 					controllers = controllers[:i]
@@ -244,7 +239,8 @@ func (co *Coroutine) end() {
 	co.flag |= flagEnded
 
 	co.clearDeps()
-	co.clearInners()
+	co.clearCleanups()
+	co.removeFromParent()
 
 	if len(co.defers) != 0 {
 		panic("async: not all deferred tasks are handled (internal error)")
@@ -267,29 +263,43 @@ func (co *Coroutine) clearDeps() {
 	}
 }
 
-func (co *Coroutine) clearInners() {
-	inners := co.inners
-	co.inners = inners[:0]
-
+func (co *Coroutine) clearCleanups() {
 	pc := &co.executor.pc
-
-	for i := len(inners) - 1; i >= 0; i-- {
-		switch v := inners[i]; {
-		case v.co != nil:
-			// v.co could have been ended and recycled.
-			// We need the following check to confirm that v.co is still an inner coroutine of co.
-			if v.co.outer == co {
-				if v.co.flag&flagEnded == 0 {
-					v.co.task = Exit()
-					v.co.run()
-				}
-			}
-		case v.f != nil:
-			pc.TryCatch(v.f)
+	cleanups := co.cleanups
+	for len(co.cleanups) != 0 {
+		cleanups := co.cleanups
+		co.cleanups = nil
+		for _, c := range slices.Backward(cleanups) {
+			pc.TryCatch(c.Cleanup)
 		}
 	}
+	clear(cleanups)
+	co.cleanups = cleanups[:0]
+}
 
-	clear(inners)
+func (co *Coroutine) removeFromParent() {
+	outer := co.outer
+	if outer == nil {
+		return
+	}
+	for i, c := range outer.cleanups {
+		if c == (*innerCoroutineCleanup)(co) {
+			outer.cleanups = slices.Delete(outer.cleanups, i, i+1)
+			break
+		}
+	}
+	co.outer = nil
+}
+
+type innerCoroutineCleanup Coroutine
+
+func (inner *innerCoroutineCleanup) Cleanup() {
+	inner.task = Exit()
+	inner.outer = nil
+	(*Coroutine)(inner).run()
+	if inner.flag&flagEnded == 0 {
+		panic("async: inner coroutine did not end (internal error)")
+	}
 }
 
 // Executor returns the executor that spawned co.
@@ -315,8 +325,11 @@ func (co *Coroutine) Exiting() bool {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	deps := co.deps
+	if co.Exiting() {
+		return
+	}
 	for _, d := range ev {
+		deps := co.deps
 		if deps == nil {
 			deps = make(map[Event]bool)
 			co.deps = deps
@@ -329,8 +342,11 @@ func (co *Coroutine) Watch(ev ...Event) {
 // WatchSeq watches a sequence of events from seq so that, when any of them
 // notifies, co resumes.
 func (co *Coroutine) WatchSeq(seq iter.Seq[Event]) {
-	deps := co.deps
+	if co.Exiting() {
+		return
+	}
 	for d := range seq {
+		deps := co.deps
 		if deps == nil {
 			deps = make(map[Event]bool)
 			co.deps = deps
@@ -340,16 +356,45 @@ func (co *Coroutine) WatchSeq(seq iter.Seq[Event]) {
 	}
 }
 
-// Cleanup adds a function call when co resumes or ends, or when co is making
-// a transit to work on another [Task].
-func (co *Coroutine) Cleanup(f func()) {
-	co.inners = append(co.inners, coroutineOrFunc{f: f})
+// Cleanup represents any type that carries a Cleanup method.
+// A Cleanup can be added to a coroutine in a [Task] function for making
+// an effect some time later when the coroutine resumes or ends, or when
+// the coroutine is making a transit to work on another [Task].
+type Cleanup interface {
+	Cleanup()
+}
+
+// A CleanupFunc is a func() that implements the [Cleanup] interface.
+type CleanupFunc func()
+
+// Cleanup implements the [Cleanup] interface.
+func (f CleanupFunc) Cleanup() { f() }
+
+// Cleanup adds something to clean up when co resumes or ends, or when co is
+// making a transit to work on another [Task].
+func (co *Coroutine) Cleanup(c Cleanup) {
+	if c == nil {
+		return
+	}
+	co.cleanups = append(co.cleanups, c)
+}
+
+// CleanupFunc adds a function call when co resumes or ends, or when co is
+// making a transit to work on another [Task].
+func (co *Coroutine) CleanupFunc(f func()) {
+	if f == nil {
+		return
+	}
+	co.Cleanup(CleanupFunc(f))
 }
 
 // Defer adds a [Task] for execution when returning from a [Func].
 // Deferred tasks are executed in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
-	co.defers = append(co.defers, must(t))
+	if t == nil {
+		return
+	}
+	co.defers = append(co.defers, t)
 }
 
 // Spawn creates an inner coroutine to work on t, using the result of
@@ -363,7 +408,7 @@ func (co *Coroutine) Spawn(p string, t Task) {
 
 	if inner.flag&flagEnded == 0 {
 		inner.outer = co
-		co.inners = append(co.inners, coroutineOrFunc{co: inner})
+		co.cleanups = append(co.cleanups, (*innerCoroutineCleanup)(inner))
 	}
 }
 
@@ -409,7 +454,9 @@ func (co *Coroutine) Await(ev ...Event) Result {
 	if co.Exiting() {
 		panic("async: yielding while exiting")
 	}
-	co.Watch(ev...)
+	if len(ev) != 0 {
+		co.Watch(ev...)
+	}
 	return Result{action: doYield}
 }
 
@@ -481,10 +528,6 @@ type controller interface {
 	negotiate(co *Coroutine, res Result) Result
 }
 
-type cleanup interface {
-	cleanup()
-}
-
 // A Task is a piece of work that a coroutine is given to do when it is spawned.
 // The return value of a task, a [Result], determines what next for a coroutine
 // to do.
@@ -537,7 +580,9 @@ func End() Task {
 // If ev is empty, Await returns a [Task] that never ends.
 func Await(ev ...Event) Task {
 	return func(co *Coroutine) Result {
-		co.Watch(ev...)
+		if len(ev) != 0 {
+			co.Watch(ev...)
+		}
 		return co.Yield(End())
 	}
 }
@@ -804,6 +849,6 @@ func (c *seqController) negotiate(co *Coroutine, res Result) Result {
 	return res
 }
 
-func (c *seqController) cleanup() {
+func (c *seqController) Cleanup() {
 	c.stop()
 }

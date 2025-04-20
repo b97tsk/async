@@ -15,11 +15,6 @@ type Semaphore struct {
 	waiters []*waiter
 }
 
-type waiter struct {
-	Signal
-	n int64
-}
-
 // NewSemaphore creates a new weighted semaphore with the given maximum
 // combined weight.
 func NewSemaphore(n int64) *Semaphore {
@@ -39,9 +34,7 @@ func (s *Semaphore) Acquire(n int64) Task {
 			}
 			w := &waiter{n: n}
 			s.waiters = append(s.waiters, w)
-			co.Cleanup(func() {
-				w.n = 0 // Nullify w in case co is exiting.
-			})
+			co.Cleanup(w)
 			co.Watch(w)
 			return co.Yield(End())
 		}
@@ -77,4 +70,13 @@ func (s *Semaphore) notifyWaiters() {
 		w.Notify()
 	}
 	s.waiters = slices.Delete(s.waiters, 0, i)
+}
+
+type waiter struct {
+	Signal
+	n int64
+}
+
+func (w *waiter) Cleanup() {
+	w.n = 0
 }
