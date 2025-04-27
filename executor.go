@@ -16,8 +16,11 @@ import (
 //
 // The internal queue is a priority queue.
 // Coroutines added in the queue are sorted by their paths.
-// Coroutines with the same path are sorted by their arrival order (FIFO).
-// Popping the queue removes the first coroutine with the least path.
+// Coroutines with the same path are sorted by their levels
+// (inner coroutines have one level higher than their outer ones).
+// Coroutines with the same path and level are sorted by their arrival order
+// (FIFO).
+// Popping the queue removes the first coroutine with the least path or level.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to

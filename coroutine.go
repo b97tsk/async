@@ -51,6 +51,7 @@ type Coroutine struct {
 	outer       *Coroutine
 	executor    *Executor
 	path        string
+	level       uint
 	task        Task
 	deps        map[Event]bool
 	cleanups    []Cleanup
@@ -95,6 +96,7 @@ func (co *Coroutine) init(e *Executor, p string, t Task) *Coroutine {
 	co.flag = flagStale
 	co.executor = e
 	co.path = p
+	co.level = 0
 	co.task = t
 	return co
 }
@@ -104,8 +106,21 @@ func (co *Coroutine) recyclable() *Coroutine {
 	return co
 }
 
+func cmpstring(x, y string) int {
+	if x < y {
+		return -1
+	}
+	if x > y {
+		return +1
+	}
+	return 0
+}
+
 func (co *Coroutine) less(other *Coroutine) bool {
-	return co.path < other.path
+	if c := cmpstring(co.path, other.path); c != 0 {
+		return c == -1
+	}
+	return co.level < other.level
 }
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
@@ -421,7 +436,19 @@ func (co *Coroutine) Defer(t Task) {
 // Inner coroutines are ended automatically when the outer one resumes or
 // ends, or when the outer one is making a transit to work on another task.
 func (co *Coroutine) Spawn(p string, t Task) {
-	inner := co.executor.newCoroutine().init(co.executor, path.Join(co.path, p), t).recyclable()
+	level := co.level + 1
+	if level == 0 {
+		panic("async: too many levels")
+	}
+
+	if p == "" || p == "." || p == "/" {
+		p = co.path // The same as `p = path.Join(co.path, p)` with no allocation.
+	} else {
+		p = path.Join(co.path, p)
+	}
+
+	inner := co.executor.newCoroutine().init(co.executor, p, t).recyclable()
+	inner.level = level
 	inner.run()
 
 	if inner.flag&flagEnded == 0 {
