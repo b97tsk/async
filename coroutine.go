@@ -934,3 +934,72 @@ func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
 	}
 	return v
 }
+
+// Join returns a [Task] that runs each of the given tasks in an inner
+// coroutine and awaits until all of them complete, and then ends.
+func Join(s ...Task) Task {
+	key := new(int)
+	return func(co *Coroutine) Result {
+		type object struct {
+			wg    WaitGroup
+			tasks []Task
+		}
+		o := cacheFor[object](co, key, func() *object {
+			o := new(object)
+			done := func(co *Coroutine) Result {
+				o.wg.Done()
+				return co.End()
+			}
+			tasks := slices.Clone(s)
+			for i, t := range tasks {
+				tasks[i] = func(co *Coroutine) Result {
+					co.Defer(done)
+					return co.Transit(t)
+				}
+			}
+			o.tasks = tasks
+			return o
+		})
+		co.Watch(&o.wg)
+		o.wg.Add(len(o.tasks))
+		for _, t := range o.tasks {
+			co.Spawn("", t)
+		}
+		return co.Yield(End())
+	}
+}
+
+// Select returns a [Task] that runs each of the given tasks in an inner
+// coroutine and awaits until any of them completes, and then ends.
+// When Select ends, tasks other than the one that completes are forcely
+// exited.
+func Select(s ...Task) Task {
+	key := new(int)
+	return func(co *Coroutine) Result {
+		type object struct {
+			sig   Signal
+			tasks []Task
+		}
+		o := cacheFor[object](co, key, func() *object {
+			o := new(object)
+			done := func(co *Coroutine) Result {
+				o.sig.Notify()
+				return co.End()
+			}
+			tasks := slices.Clone(s)
+			for i, t := range tasks {
+				tasks[i] = func(co *Coroutine) Result {
+					co.Defer(done)
+					return co.Transit(t)
+				}
+			}
+			o.tasks = tasks
+			return o
+		})
+		co.Watch(&o.sig)
+		for _, t := range o.tasks {
+			co.Spawn("", t)
+		}
+		return co.Yield(End())
+	}
+}

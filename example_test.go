@@ -1,6 +1,7 @@
 package async_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -1028,4 +1029,162 @@ func ExampleFromSeq() {
 	// 5
 	// 7
 	// 9
+}
+
+func ExampleJoin() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	var s1, s2 async.State[int]
+
+	myExecutor.Spawn("/", async.Block(
+		async.Join(
+			func(co *async.Coroutine) async.Result {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
+					ans := 15
+					myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+				}()
+				return co.Transit(async.Await(&s1))
+			},
+			func(co *async.Coroutine) async.Result {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
+					ans := 27
+					myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+				}()
+				return co.Transit(async.Await(&s2))
+			},
+		),
+		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// s1 + s2 = 42
+}
+
+func ExampleSelect() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	var s1, s2 async.State[int]
+
+	myExecutor.Spawn("/", async.Block(
+		async.Select(
+			func(co *async.Coroutine) async.Result {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
+					ans := 15
+					myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+				}()
+				return co.Transit(async.Await(&s1))
+			},
+			func(co *async.Coroutine) async.Result {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
+					ans := 27
+					myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+				}()
+				return co.Transit(async.Await(&s2))
+			},
+		),
+		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// s1 + s2 = 15
+}
+
+// Without cancellation, ExampleSelect takes the same amount of time as
+// ExampleJoin, which is unacceptable.
+// The following example fixes that.
+func ExampleSelect_withCancel() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	var s1, s2 async.State[int]
+
+	myExecutor.Spawn("/", async.Block(
+		async.Func(
+			func(co *async.Coroutine) async.Result {
+				ctx, cancel := context.WithCancel(context.Background())
+				co.Defer(async.Do(cancel))
+				return co.Transit(async.Select(
+					func(co *async.Coroutine) async.Result {
+						wg.Add(1)
+						go func() {
+							defer wg.Done()
+							select { // Heavy work #1 here.
+							case <-time.After(500 * time.Millisecond):
+							case <-ctx.Done():
+								return // Cancel work when ctx gets canceled.
+							}
+							ans := 15
+							myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+						}()
+						return co.Transit(async.Await(&s1))
+					},
+					func(co *async.Coroutine) async.Result {
+						wg.Add(1)
+						go func() {
+							defer wg.Done()
+							select { // Heavy work #2 here.
+							case <-time.After(1500 * time.Millisecond):
+							case <-ctx.Done():
+								return // Cancel work when ctx gets canceled.
+							}
+							ans := 27
+							myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+						}()
+						return co.Transit(async.Await(&s2))
+					},
+				))
+			},
+		),
+		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// s1 + s2 = 15
 }
