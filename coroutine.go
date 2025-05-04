@@ -947,12 +947,14 @@ func Select(s ...Task) Task {
 	return func(co *Coroutine) Result {
 		type object struct {
 			sig   Signal
+			done  bool
 			tasks []Task
 		}
 		o := cacheFor[object](co, key, func() *object {
 			o := new(object)
 			done := func(co *Coroutine) Result {
 				o.sig.Notify()
+				o.done = true
 				return co.End()
 			}
 			tasks := slices.Clone(s)
@@ -966,8 +968,12 @@ func Select(s ...Task) Task {
 			return o
 		})
 		co.Watch(&o.sig)
+		o.done = false
 		for _, t := range o.tasks {
 			co.Spawn(t)
+			if o.done {
+				return co.End()
+			}
 		}
 		return co.Yield(End())
 	}
