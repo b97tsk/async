@@ -6,31 +6,31 @@ func TestPriorityQueue(t *testing.T) {
 	t.Run("Overall", func(t *testing.T) {
 		var pq priorityqueue[*Coroutine]
 
-		for _, r := range "abcdefgh" {
-			pq.Push(&Coroutine{path: string(r)})
+		for _, lv := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
+			pq.Push(&Coroutine{level: lv})
 		}
 
-		for _, r := range "abcd" {
-			if co := pq.Pop(); co.path != string(r) {
+		for _, lv := range []int{1, 2, 3, 4} {
+			if co := pq.Pop(); co.level != lv {
 				t.FailNow()
 			}
 		}
 
-		for _, r := range "ijk" {
-			pq.Push(&Coroutine{path: string(r)})
+		for _, lv := range []int{9, 10, 11, 12} {
+			pq.Push(&Coroutine{level: lv})
 		}
 
-		pq.Push(&Coroutine{path: "d"})
+		pq.Push(&Coroutine{level: 4})
 
-		if co := pq.Pop(); co.path != "d" {
+		if co := pq.Pop(); co.level != 4 {
 			t.FailNow()
 		}
 
-		pq.Push(&Coroutine{path: "g"})
-		pq.Push(&Coroutine{path: "f"})
+		pq.Push(&Coroutine{level: 7})
+		pq.Push(&Coroutine{level: 6})
 
-		for _, r := range "effgghijk" {
-			if co := pq.Pop(); co.path != string(r) {
+		for _, lv := range []int{5, 6, 6, 7, 7, 8, 9, 10, 11, 12} {
+			if co := pq.Pop(); co.level != lv {
 				t.FailNow()
 			}
 		}
@@ -42,9 +42,9 @@ func TestPriorityQueue(t *testing.T) {
 	t.Run("FIFO", func(t *testing.T) {
 		var pq priorityqueue[*Coroutine]
 
-		co1 := &Coroutine{path: "/"}
-		co2 := &Coroutine{path: "/"}
-		co3 := &Coroutine{path: "/"}
+		co1 := new(Coroutine)
+		co2 := new(Coroutine)
+		co3 := new(Coroutine)
 
 		pq.Push(co1)
 		pq.Push(co2)

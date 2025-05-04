@@ -11,11 +11,6 @@ import (
 	"github.com/b97tsk/async"
 )
 
-// This example demonstrates how to spawn tasks with different paths.
-// The lower path, the higher priority.
-// This example creates a task with path "aa" for additional computations
-// and another task with path "zz" for printing results.
-// The former runs before the latter because "aa" < "zz".
 func Example() {
 	// Create an executor.
 	var myExecutor async.Executor
@@ -24,79 +19,61 @@ func Example() {
 	// The best practice is to pass a function that does not block. See Example (NonBlocking).
 	myExecutor.Autorun(myExecutor.Run)
 
-	// Create two states.
+	// Create some states.
 	s1, s2 := async.NewState(1), async.NewState(2)
+	op := async.NewState('+')
 
 	// Although states can be created without the help of executors,
 	// they might only be safe for use by one and only one executor because of data races.
 	// Without proper synchronization, it's better only to spawn coroutines to read or update states.
 
-	var sum, product async.State[int]
-
-	myExecutor.Spawn("aa", func(co *async.Coroutine) async.Result { // The path of co is "aa".
-		co.Watch(s1, s2) // Let co depend on s1 and s2, so co can re-run whenever s1 or s2 changes.
-		sum.Set(s1.Get() + s2.Get())
-		product.Set(s1.Get() * s2.Get())
-		return co.Await() // Awaits signals or state changes.
-	})
-
-	// The above task re-runs whenever s1 or s2 changes. As an example, this is fine.
-	// In practice, one should probably use memos to avoid unnecessary recomputations. See Example (Memo).
-
-	op := async.NewState('+')
-
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result { // The path of co is "zz".
-		co.Watch(op)
+	// Create a coroutine to print the sum or the product of s1 and s2, depending on what op is.
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		co.Watch(op) // Let co depend on op, so co can re-run whenever op changes.
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			// The path of an inner coroutine is relative to its outer one.
-			co.Spawn("sum", func(co *async.Coroutine) async.Result { // The path of inner co is "zz/sum".
-				fmt.Println("s1 + s2 =", sum.Get())
-				return co.Await(&sum)
+			// Using an inner coroutine to narrow down what has to react whenever a state changes might be a good idea.
+			// The following creates an inner coroutine, it runs immediately and re-runs whenever s1 or s2 changes.
+			co.Spawn(func(co *async.Coroutine) async.Result {
+				fmt.Println("s1 + s2 =", s1.Get()+s2.Get())
+				return co.Await(s1, s2) // Watches s1 and s2, and awaits.
 			})
 		case '*':
-			co.Spawn("product", func(co *async.Coroutine) async.Result { // The path of inner co is "zz/product".
-				fmt.Println("s1 * s2 =", product.Get())
-				return co.Await(&product)
+			co.Spawn(func(co *async.Coroutine) async.Result {
+				fmt.Println("s1 * s2 =", s1.Get()*s2.Get())
+				return co.Await(s1, s2)
 			})
 		}
 
-		return co.Await()
+		return co.Await() // Awaits anything that has been watched (in this case, op).
 	})
 
 	fmt.Println("--- SEPARATOR ---")
 
-	// The followings create several tasks to mutate states.
-	// They share the same path, "/", which is lower than "aa" and "zz".
-	// Remember that, the lower path, the higher priority.
-	// Updating states should have higher priority, so that when there are multiple update tasks,
-	// they can run together before any read task.
-	// This reduces the number of reads that have to react on update.
-
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(3)
 		s2.Set(4)
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		op.Set('*')
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(5)
 		s2.Set(6)
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(7)
 		s2.Set(8)
 		op.Set('+')
@@ -126,14 +103,14 @@ func Example_memo() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+	sum := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v) // Update s only when its value changes to stop unnecessary propagation.
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+	product := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
@@ -142,19 +119,19 @@ func Example_memo() {
 
 	op := async.NewState('+')
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(op)
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			co.Spawn("sum", func(co *async.Coroutine) async.Result {
+			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
 				return co.Await(sum)
 			})
 		case '*':
-			co.Spawn("product", func(co *async.Coroutine) async.Result {
+			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
 				return co.Await(product)
 			})
@@ -165,27 +142,27 @@ func Example_memo() {
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(3)
 		s2.Set(4)
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		op.Set('*')
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(5)
 		s2.Set(6)
 	}))
 
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(7)
 		s2.Set(8)
 		op.Set('+')
@@ -224,14 +201,14 @@ func Example_nonBlocking() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+	sum := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v)
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+	product := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
@@ -240,19 +217,19 @@ func Example_nonBlocking() {
 
 	op := async.NewState('+')
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(op)
 
 		fmt.Println("op =", "'"+string(op.Get())+"'")
 
 		switch op.Get() {
 		case '+':
-			co.Spawn("sum", func(co *async.Coroutine) async.Result {
+			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
 				return co.Await(sum)
 			})
 		case '*':
-			co.Spawn("product", func(co *async.Coroutine) async.Result {
+			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
 				return co.Await(product)
 			})
@@ -264,7 +241,7 @@ func Example_nonBlocking() {
 	wg.Wait() // Wait for autorun to complete.
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(3)
 		s2.Set(4)
 	}))
@@ -272,14 +249,14 @@ func Example_nonBlocking() {
 	wg.Wait()
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		op.Set('*')
 	}))
 
 	wg.Wait()
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(5)
 		s2.Set(6)
 	}))
@@ -287,7 +264,7 @@ func Example_nonBlocking() {
 	wg.Wait()
 	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn("/", async.Do(func() {
+	myExecutor.Spawn(async.Do(func() {
 		s1.Set(7)
 		s2.Set(8)
 		op.Set('+')
@@ -318,7 +295,7 @@ func Example_conditional() {
 
 	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
 
-	myExecutor.Spawn("aa", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(s1, s2) // Always depends on s1 and s2.
 
 		v := s1.Get() + s2.Get()
@@ -333,11 +310,11 @@ func Example_conditional() {
 
 	inc := func(i int) int { return i + 1 }
 
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
-	myExecutor.Spawn("/", async.Do(func() { s1.Update(inc) }))
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() }))
-	myExecutor.Spawn("/", async.Do(func() { s2.Update(inc) }))
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Do(func() { s1.Update(inc) }))
+	myExecutor.Spawn(async.Do(func() { s3.Notify() }))
+	myExecutor.Spawn(async.Do(func() { s2.Update(inc) }))
+	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
 
 	// Output:
 	// 3
@@ -354,7 +331,7 @@ func Example_conditionalMemo() {
 
 	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
 
-	m := async.NewMemo(&myExecutor, "aa", func(co *async.Coroutine, s *async.State[int]) {
+	m := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2) // Always depends on s1 and s2.
 
 		v := s1.Get() + s2.Get()
@@ -366,7 +343,7 @@ func Example_conditionalMemo() {
 		s.Set(v)
 	})
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(m)
 		fmt.Println(m.Get())
 		return co.Await()
@@ -374,11 +351,11 @@ func Example_conditionalMemo() {
 
 	inc := func(i int) int { return i + 1 }
 
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
-	myExecutor.Spawn("/", async.Do(func() { s1.Update(inc) }))
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() }))
-	myExecutor.Spawn("/", async.Do(func() { s2.Update(inc) }))
-	myExecutor.Spawn("/", async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Do(func() { s1.Update(inc) }))
+	myExecutor.Spawn(async.Do(func() { s3.Notify() }))
+	myExecutor.Spawn(async.Do(func() { s2.Update(inc) }))
+	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
 
 	// Output:
 	// 3
@@ -397,7 +374,7 @@ func Example_end() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(&myState)
 
 		v := myState.Get()
@@ -411,7 +388,7 @@ func Example_end() {
 	})
 
 	for i := 1; i <= 5; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 5.
@@ -433,7 +410,7 @@ func Example_cleanupFunc() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(&myState)
 
 		v := myState.Get()
@@ -447,7 +424,7 @@ func Example_cleanupFunc() {
 	})
 
 	for i := 1; i <= 5; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 5.
@@ -469,7 +446,7 @@ func Example_switch() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(&myState)
 
 		v := myState.Get()
@@ -494,7 +471,7 @@ func Example_switch() {
 	})
 
 	for i := 1; i <= 7; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 7.
@@ -556,10 +533,10 @@ func ExampleTask_Then() {
 		return co.End()
 	}
 
-	myExecutor.Spawn("zz", async.Task(a).Then(b))
+	myExecutor.Spawn(async.Task(a).Then(b))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -598,13 +575,13 @@ func ExampleAwait() {
 		v1, v2 int
 	}
 
-	myExecutor.Spawn("/", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 			ans := 15
-			myExecutor.Spawn("/", async.Do(func() {
+			myExecutor.Spawn(async.Do(func() {
 				myState.v1 = ans
 				myState.Notify()
 			}))
@@ -617,7 +594,7 @@ func ExampleAwait() {
 					defer wg.Done()
 					time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
 					ans := 27
-					myExecutor.Spawn("/", async.Do(func() {
+					myExecutor.Spawn(async.Do(func() {
 						myState.v2 = ans
 						myState.Notify()
 					}))
@@ -648,7 +625,7 @@ func ExampleBlock() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		var t async.Task
 
 		t = async.Block(
@@ -670,7 +647,7 @@ func ExampleBlock() {
 	})
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -690,7 +667,7 @@ func ExampleLoop() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.Loop(async.Block(
+	myExecutor.Spawn(async.Loop(async.Block(
 		async.Await(&myState),
 		func(co *async.Coroutine) async.Result {
 			if v := myState.Get(); v%2 == 0 {
@@ -710,7 +687,7 @@ func ExampleLoop() {
 	)))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -730,7 +707,7 @@ func ExampleLoopN() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.LoopN(7, async.Block(
+	myExecutor.Spawn(async.LoopN(7, async.Block(
 		async.Await(&myState),
 		func(co *async.Coroutine) async.Result {
 			if v := myState.Get(); v%2 == 0 {
@@ -744,7 +721,7 @@ func ExampleLoopN() {
 	)))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -764,7 +741,7 @@ func ExampleFunc() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
@@ -796,7 +773,7 @@ func ExampleFunc() {
 	))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -819,7 +796,7 @@ func ExampleFunc_exit() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
@@ -851,7 +828,7 @@ func ExampleFunc_exit() {
 	))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -891,7 +868,7 @@ func ExampleFunc_panic() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
 			async.Do(func() { fmt.Println("defer 1") }),
 		),
@@ -923,7 +900,7 @@ func ExampleFunc_panic() {
 	))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -947,7 +924,8 @@ func ExampleFunc_tailcall() {
 
 	myExecutor.Autorun(myExecutor.Run)
 
-	myExecutor.Spawn("#1", func(co *async.Coroutine) async.Result {
+	// Case 1: Making tail-call in the last task of a block.
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		var n int
 
 		var t async.Task
@@ -968,7 +946,8 @@ func ExampleFunc_tailcall() {
 		return co.Transit(t.Then(async.Do(func() { fmt.Println(n) })))
 	})
 
-	myExecutor.Spawn("#2", func(co *async.Coroutine) async.Result {
+	// Case 2: Making tail-call anywhere.
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		var n int
 
 		var t async.Task
@@ -977,7 +956,7 @@ func ExampleFunc_tailcall() {
 			func(co *async.Coroutine) async.Result {
 				if n < 2000000 {
 					n++
-					co.Defer(t)        // Tail-call here (workaround).
+					co.Defer(t)        // Tail-call here (using the only defer call as a workaround).
 					return co.Return() // Early return.
 				}
 				return co.End()
@@ -1002,7 +981,7 @@ func ExampleFromSeq() {
 
 	var myState async.State[int]
 
-	myExecutor.Spawn("zz", async.FromSeq(
+	myExecutor.Spawn(async.FromSeq(
 		func(yield func(async.Task) bool) {
 			await := async.Await(&myState)
 			for yield(await) {
@@ -1018,7 +997,7 @@ func ExampleFromSeq() {
 	))
 
 	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn("/", async.Do(func() { myState.Set(i) }))
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
 	}
 
 	fmt.Println(myState.Get()) // Prints 9.
@@ -1046,7 +1025,7 @@ func ExampleJoin() {
 
 	var s1, s2 async.State[int]
 
-	myExecutor.Spawn("/", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Join(
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1054,7 +1033,7 @@ func ExampleJoin() {
 					defer wg.Done()
 					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 					ans := 15
-					myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
 				return co.Transit(async.Await(&s1))
 			},
@@ -1064,7 +1043,7 @@ func ExampleJoin() {
 					defer wg.Done()
 					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
 					ans := 27
-					myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
 				return co.Transit(async.Await(&s2))
 			},
@@ -1093,7 +1072,7 @@ func ExampleSelect() {
 
 	var s1, s2 async.State[int]
 
-	myExecutor.Spawn("/", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Select(
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1101,7 +1080,7 @@ func ExampleSelect() {
 					defer wg.Done()
 					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 					ans := 15
-					myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
 				return co.Transit(async.Await(&s1))
 			},
@@ -1111,7 +1090,7 @@ func ExampleSelect() {
 					defer wg.Done()
 					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
 					ans := 27
-					myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
 				return co.Transit(async.Await(&s2))
 			},
@@ -1143,7 +1122,7 @@ func ExampleSelect_withCancel() {
 
 	var s1, s2 async.State[int]
 
-	myExecutor.Spawn("/", async.Block(
+	myExecutor.Spawn(async.Block(
 		async.Func(
 			func(co *async.Coroutine) async.Result {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -1159,7 +1138,7 @@ func ExampleSelect_withCancel() {
 								return // Cancel work when ctx gets canceled.
 							}
 							ans := 15
-							myExecutor.Spawn("/", async.Do(func() { s1.Set(ans) }))
+							myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 						}()
 						return co.Transit(async.Await(&s1))
 					},
@@ -1173,7 +1152,7 @@ func ExampleSelect_withCancel() {
 								return // Cancel work when ctx gets canceled.
 							}
 							ans := 27
-							myExecutor.Spawn("/", async.Do(func() { s2.Set(ans) }))
+							myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 						}()
 						return co.Transit(async.Await(&s2))
 					},

@@ -1,9 +1,6 @@
 package async
 
-import (
-	"path"
-	"sync"
-)
+import "sync"
 
 // An Executor is a coroutine spawner, and a coroutine runner.
 //
@@ -15,12 +12,10 @@ import (
 // The best practice is not to block.
 //
 // The internal queue is a priority queue.
-// Coroutines added in the queue are sorted by their paths.
-// Coroutines with the same path are sorted by their levels
+// Coroutines added in the queue are sorted by their levels
 // (inner coroutines have one level higher than their outer ones).
-// Coroutines with the same path and level are sorted by their arrival order
-// (FIFO).
-// Popping the queue removes the first coroutine with the least path or level.
+// Coroutines with the same level are sorted by their arrival order (FIFO).
+// Popping the queue removes the first coroutine with the least level.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to
@@ -70,17 +65,16 @@ func (e *Executor) Run() {
 	pc.Rethrow()
 }
 
-// Spawn creates a coroutine to work on t, using the result of path.Clean(p)
-// as its path.
+// Spawn creates a coroutine to work on t.
 //
 // The coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
 // Spawn is safe for concurrent use.
-func (e *Executor) Spawn(p string, t Task) {
+func (e *Executor) Spawn(t Task) {
 	var autorun func()
 
-	co := e.newCoroutine().init(e, path.Clean(p), t).recyclable()
+	co := e.newCoroutine().init(e, t).recyclable()
 
 	e.mu.Lock()
 

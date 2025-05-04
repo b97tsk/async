@@ -2,7 +2,6 @@ package async
 
 import (
 	"iter"
-	"path"
 	"slices"
 	"weak"
 )
@@ -50,8 +49,7 @@ type Coroutine struct {
 	flag        uint8
 	outer       *Coroutine
 	executor    *Executor
-	path        string
-	level       uint
+	level       int
 	task        Task
 	deps        map[Event]bool
 	cleanups    []Cleanup
@@ -92,10 +90,9 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 	}
 }
 
-func (co *Coroutine) init(e *Executor, p string, t Task) *Coroutine {
+func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
 	co.flag = flagStale
 	co.executor = e
-	co.path = p
 	co.level = 0
 	co.task = t
 	return co
@@ -106,20 +103,7 @@ func (co *Coroutine) recyclable() *Coroutine {
 	return co
 }
 
-func cmpstring(x, y string) int {
-	if x < y {
-		return -1
-	}
-	if x > y {
-		return +1
-	}
-	return 0
-}
-
 func (co *Coroutine) less(other *Coroutine) bool {
-	if c := cmpstring(co.path, other.path); c != 0 {
-		return c == -1
-	}
 	return co.level < other.level
 }
 
@@ -343,14 +327,6 @@ func (co *Coroutine) Executor() *Executor {
 	return co.executor
 }
 
-// Path returns the path of co.
-//
-// Since co can be recycled by an executor, it is recommended to save
-// the return value in a variable first.
-func (co *Coroutine) Path() string {
-	return co.path
-}
-
 // Exiting reports whether co is exiting.
 func (co *Coroutine) Exiting() bool {
 	return co.flag&flagExiting != 0
@@ -430,24 +406,17 @@ func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, t)
 }
 
-// Spawn creates an inner coroutine to work on t, using the result of
-// path.Join(co.Path(), p) as its path.
+// Spawn creates an inner coroutine to work on t.
 //
 // Inner coroutines are ended automatically when the outer one resumes or
 // ends, or when the outer one is making a transit to work on another task.
-func (co *Coroutine) Spawn(p string, t Task) {
+func (co *Coroutine) Spawn(t Task) {
 	level := co.level + 1
-	if level == 0 {
+	if level < 0 {
 		panic("async: too many levels")
 	}
 
-	if p == "" || p == "." || p == "/" {
-		p = co.path // The same as `p = path.Join(co.path, p)` with no allocation.
-	} else {
-		p = path.Join(co.path, p)
-	}
-
-	inner := co.executor.newCoroutine().init(co.executor, p, t).recyclable()
+	inner := co.executor.newCoroutine().init(co.executor, t).recyclable()
 	inner.level = level
 	inner.run()
 
@@ -963,7 +932,7 @@ func Join(s ...Task) Task {
 		co.Watch(&o.wg)
 		o.wg.Add(len(o.tasks))
 		for _, t := range o.tasks {
-			co.Spawn("", t)
+			co.Spawn(t)
 		}
 		return co.Yield(End())
 	}
@@ -998,7 +967,7 @@ func Select(s ...Task) Task {
 		})
 		co.Watch(&o.sig)
 		for _, t := range o.tasks {
-			co.Spawn("", t)
+			co.Spawn(t)
 		}
 		return co.Yield(End())
 	}

@@ -33,7 +33,7 @@ func ExampleWaitGroup() {
 		defer wg.Done()
 		time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 		ans := 15
-		myExecutor.Spawn("/", async.Do(func() {
+		myExecutor.Spawn(async.Do(func() {
 			myState.v1 = ans
 			myState.wg.Done()
 		}))
@@ -44,13 +44,13 @@ func ExampleWaitGroup() {
 		defer wg.Done()
 		time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
 		ans := 27
-		myExecutor.Spawn("/", async.Do(func() {
+		myExecutor.Spawn(async.Do(func() {
 			myState.v2 = ans
 			myState.wg.Done()
 		}))
 	}()
 
-	myExecutor.Spawn("/", myState.wg.Await().Then(async.Do(func() {
+	myExecutor.Spawn(myState.wg.Await().Then(async.Do(func() {
 		fmt.Println("v1 + v2 =", myState.v1+myState.v2)
 	})))
 
