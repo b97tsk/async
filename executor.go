@@ -14,8 +14,11 @@ import "sync"
 // The internal queue is a priority queue.
 // Coroutines added in the queue are sorted by their levels
 // (inner coroutines have one level higher than their outer ones).
-// Coroutines with the same level are sorted by their arrival order (FIFO).
-// Popping the queue removes the first coroutine with the least level.
+// Coroutines with the same level are sorted by their weights.
+// Coroutines with the same level and weight are sorted by their arrival
+// order (FIFO).
+// Popping the queue removes the first coroutine with the least level or
+// the highest weight.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to
@@ -65,16 +68,26 @@ func (e *Executor) Run() {
 	pc.Rethrow()
 }
 
-// Spawn creates a coroutine to work on t.
+// Spawn creates a coroutine with default weight to work on t.
 //
 // The coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
 // Spawn is safe for concurrent use.
 func (e *Executor) Spawn(t Task) {
+	e.SpawnWeighted(0, t)
+}
+
+// SpawnWeighted creates a coroutine with weight w to work on t.
+//
+// The coroutine is added in a queue. To run it, either call the Run method, or
+// call the Autorun method to set up an autorun function beforehand.
+//
+// SpawnWeighted is safe for concurrent use.
+func (e *Executor) SpawnWeighted(w Weight, t Task) {
 	var autorun func()
 
-	co := e.newCoroutine().init(e, t).recyclable()
+	co := e.newCoroutine().init(e, t).recyclable().withWeight(w)
 
 	e.mu.Lock()
 

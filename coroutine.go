@@ -47,9 +47,10 @@ const (
 // A coroutine can transit from one task to another until a task ends it.
 type Coroutine struct {
 	flag        uint8
+	level       uint32
+	weight      Weight
 	outer       *Coroutine
 	executor    *Executor
-	level       int
 	task        Task
 	deps        map[Event]bool
 	cleanups    []Cleanup
@@ -57,6 +58,9 @@ type Coroutine struct {
 	controllers []controller
 	cache       map[any]cacheEntry
 }
+
+// Weight is the type of weight for use when spawning a weighted coroutine.
+type Weight int
 
 type cacheEntry interface {
 	isDead() bool
@@ -92,8 +96,9 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 
 func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
 	co.flag = flagStale
-	co.executor = e
 	co.level = 0
+	co.weight = 0
+	co.executor = e
 	co.task = t
 	return co
 }
@@ -103,8 +108,31 @@ func (co *Coroutine) recyclable() *Coroutine {
 	return co
 }
 
+func (co *Coroutine) withLevel(l uint32) *Coroutine {
+	co.level = l
+	return co
+}
+
+func (co *Coroutine) withWeight(w Weight) *Coroutine {
+	co.weight = w
+	return co
+}
+
+func compare[Int intType](x, y Int) int {
+	if x < y {
+		return -1
+	}
+	if x > y {
+		return +1
+	}
+	return 0
+}
+
 func (co *Coroutine) less(other *Coroutine) bool {
-	return co.level < other.level
+	if c := compare(co.level, other.level); c != 0 {
+		return c == -1
+	}
+	return co.weight > other.weight
 }
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
@@ -406,18 +434,25 @@ func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, t)
 }
 
-// Spawn creates an inner coroutine to work on t.
+// Spawn creates an inner coroutine with default weight to work on t.
 //
 // Inner coroutines are ended automatically when the outer one resumes or
 // ends, or when the outer one is making a transit to work on another task.
 func (co *Coroutine) Spawn(t Task) {
+	co.SpawnWeighted(0, t)
+}
+
+// SpawnWeighted creates an inner coroutine with weight w to work on t.
+//
+// Inner coroutines are ended automatically when the outer one resumes or
+// ends, or when the outer one is making a transit to work on another task.
+func (co *Coroutine) SpawnWeighted(w Weight, t Task) {
 	level := co.level + 1
-	if level < 0 {
+	if level == 0 {
 		panic("async: too many levels")
 	}
 
-	inner := co.executor.newCoroutine().init(co.executor, t).recyclable()
-	inner.level = level
+	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(w)
 	inner.run()
 
 	if inner.flag&flagEnded == 0 {

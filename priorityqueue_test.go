@@ -6,17 +6,17 @@ func TestPriorityQueue(t *testing.T) {
 	t.Run("Overall", func(t *testing.T) {
 		var pq priorityqueue[*Coroutine]
 
-		for _, lv := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
+		for _, lv := range []uint32{1, 2, 3, 4, 5, 6, 7, 8} {
 			pq.Push(&Coroutine{level: lv})
 		}
 
-		for _, lv := range []int{1, 2, 3, 4} {
+		for _, lv := range []uint32{1, 2, 3, 4} {
 			if co := pq.Pop(); co.level != lv {
 				t.FailNow()
 			}
 		}
 
-		for _, lv := range []int{9, 10, 11, 12} {
+		for _, lv := range []uint32{9, 10, 11} {
 			pq.Push(&Coroutine{level: lv})
 		}
 
@@ -29,7 +29,7 @@ func TestPriorityQueue(t *testing.T) {
 		pq.Push(&Coroutine{level: 7})
 		pq.Push(&Coroutine{level: 6})
 
-		for _, lv := range []int{5, 6, 6, 7, 7, 8, 9, 10, 11, 12} {
+		for _, lv := range []uint32{5, 6, 6, 7, 7, 8, 9, 10, 11} {
 			if co := pq.Pop(); co.level != lv {
 				t.FailNow()
 			}

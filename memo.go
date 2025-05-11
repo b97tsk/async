@@ -39,18 +39,18 @@ type Memo[T any] struct {
 // whenever the last coroutine in the watch list unwatches it. The memo becomes
 // stale. The next time a new coroutine watches it, it has to make a fresh
 // computation.
-func NewMemo[T any](e *Executor, f func(co *Coroutine, s *State[T])) *Memo[T] {
-	return new(Memo[T]).init(e, f, false)
+func NewMemo[T any](e *Executor, w Weight, f func(co *Coroutine, s *State[T])) *Memo[T] {
+	return new(Memo[T]).init(e, w, f, false)
 }
 
 // NewStrictMemo returns a new strict [Memo].
 //
 // See [NewMemo] for more information.
-func NewStrictMemo[T any](e *Executor, f func(co *Coroutine, s *State[T])) *Memo[T] {
-	return new(Memo[T]).init(e, f, true)
+func NewStrictMemo[T any](e *Executor, w Weight, f func(co *Coroutine, s *State[T])) *Memo[T] {
+	return new(Memo[T]).init(e, w, f, true)
 }
 
-func (m *Memo[T]) init(e *Executor, f func(co *Coroutine, s *State[T]), strict bool) *Memo[T] {
+func (m *Memo[T]) init(e *Executor, w Weight, f func(co *Coroutine, s *State[T]), strict bool) *Memo[T] {
 	m.co.init(e, func(co *Coroutine) Result {
 		if !m.stale && len(m.state.listeners) == 0 {
 			m.stale = true
@@ -67,7 +67,7 @@ func (m *Memo[T]) init(e *Executor, f func(co *Coroutine, s *State[T]), strict b
 		f(co, &m.state)
 
 		return co.Await()
-	})
+	}).withWeight(w)
 
 	m.stale = true
 	m.strict = strict

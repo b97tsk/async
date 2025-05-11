@@ -103,14 +103,16 @@ func Example_memo() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
+	const memoWeight = 999 // Memos usually run before other tasks.
+
+	sum := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v) // Update s only when its value changes to stop unnecessary propagation.
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
+	product := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
@@ -201,14 +203,16 @@ func Example_nonBlocking() {
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
-	sum := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
+	const memoWeight = 999 // Memos usually run before other tasks.
+
+	sum := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() + s2.Get(); v != s.Get() {
 			s.Set(v)
 		}
 	})
 
-	product := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
+	product := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2)
 		if v := s1.Get() * s2.Get(); v != s.Get() {
 			s.Set(v)
@@ -331,7 +335,9 @@ func Example_conditionalMemo() {
 
 	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
 
-	m := async.NewMemo(&myExecutor, func(co *async.Coroutine, s *async.State[int]) {
+	const memoWeight = 999 // Memos usually run before other tasks.
+
+	m := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
 		co.Watch(s1, s2) // Always depends on s1 and s2.
 
 		v := s1.Get() + s2.Get()
