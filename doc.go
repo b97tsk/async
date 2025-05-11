@@ -7,17 +7,17 @@
 //
 // While Go excels at forking, async, on the other hand, excels at joining.
 //
-// # Use Case #1: Fan-in Executing Code From Various Goroutines
+// # Use Case #1: Fan-in Executing Code From Numerous Goroutines
 //
-// Wanted to execute pieces of code from various goroutines
+// Wanted to execute pieces of code from numerous goroutines
 // in a single-threaded way?
 //
-// An [Executor] is designed to be able to run tasks spawned in various
+// An [Executor] is designed to be able to run tasks spawned in numerous
 // goroutines sequentially.
 // This comes in handy when one wants to do a series of operations
 // on a single thread, for example, to read or update states that are not
-// safe for concurrent access, to write data to the console, to update one's
-// user interfaces, etc.
+// safe for concurrent access, to write data to the console or a file, to
+// update one's user interfaces, etc.
 //
 // No backpressure alert.
 // [Task] spawning is designed not to block.

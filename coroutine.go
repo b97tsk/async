@@ -427,16 +427,18 @@ func (co *Coroutine) Defer(t Task) {
 
 // Spawn creates an inner coroutine with default weight to work on t.
 //
-// Inner coroutines are ended automatically when the outer one resumes or
-// ends, or when the outer one is making a transit to work on another task.
+// Inner coroutines, if not yet ended, are forcely exited when the outer one
+// resumes or ends, or when the outer one is making a transit to work on
+// another task.
 func (co *Coroutine) Spawn(t Task) {
 	co.SpawnWeighted(0, t)
 }
 
 // SpawnWeighted creates an inner coroutine with weight w to work on t.
 //
-// Inner coroutines are ended automatically when the outer one resumes or
-// ends, or when the outer one is making a transit to work on another task.
+// Inner coroutines, if not yet ended, are forcely exited when the outer one
+// resumes or ends, or when the outer one is making a transit to work on
+// another task.
 func (co *Coroutine) SpawnWeighted(w Weight, t Task) {
 	level := co.level + 1
 	if level == 0 {

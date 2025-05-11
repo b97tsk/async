@@ -1,7 +1,7 @@
 package async
 
 // A Memo is a State-like structure that carries a value that can only be set
-// in a Task-like function.
+// in a given Task-like function driven by an internal coroutine.
 //
 // A memo is designed to have a value that is computed from other states.
 // What make a memo useful are that:
