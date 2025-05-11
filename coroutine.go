@@ -79,18 +79,9 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		co.executor = nil
 		co.task = nil
 		if len(co.cache) != 0 {
-			go func() {
-				m := co.cache
-				for k, v := range m {
-					if v.isDead() {
-						delete(m, k)
-					}
-				}
-				e.pool.Put(co)
-			}()
-		} else {
-			e.pool.Put(co)
+			removeRandomDeadEntries(co.cache)
 		}
+		e.pool.Put(co)
 	}
 }
 
@@ -930,6 +921,9 @@ func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
 		cache = make(map[any]cacheEntry)
 		co.cache = cache
 	}
+	if len(cache) != 0 {
+		removeRandomDeadEntries(cache)
+	}
 	wp, _ := cache[key].(weakPointer[T])
 	v := wp.Value()
 	if v == nil && new != nil {
@@ -937,6 +931,20 @@ func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
 		cache[key] = weakPointer[T]{weak.Make(v)}
 	}
 	return v
+}
+
+func removeRandomDeadEntries(m map[any]cacheEntry) {
+	const maxNonDeadEncountered = 10
+	n := 0
+	for k, v := range m {
+		if v.isDead() {
+			delete(m, k)
+			continue
+		}
+		if n++; n == maxNonDeadEncountered {
+			break
+		}
+	}
 }
 
 // Join returns a [Task] that runs each of the given tasks in an inner
