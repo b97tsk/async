@@ -241,6 +241,7 @@ func (co *Coroutine) run() {
 			if addController {
 				co.controllers = append(co.controllers, res.controller)
 				if capSizeLimit := 1000000; cap(co.controllers) > capSizeLimit {
+					co.flag &^= flagRecyclable
 					co.task = func(co *Coroutine) Result {
 						panic("async: too many controllers or recursions")
 					}
