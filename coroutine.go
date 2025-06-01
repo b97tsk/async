@@ -67,7 +67,7 @@ type cacheEntry interface {
 }
 
 func (e *Executor) newCoroutine() *Coroutine {
-	if co := e.pool.Get(); co != nil {
+	if co := e.coroutinePool().Get(); co != nil {
 		return co.(*Coroutine)
 	}
 	return new(Coroutine)
@@ -81,7 +81,7 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		if len(co.cache) != 0 {
 			removeRandomDeadEntries(co.cache)
 		}
-		e.pool.Put(co)
+		e.coroutinePool().Put(co)
 	}
 }
 

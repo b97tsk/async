@@ -31,7 +31,16 @@ type Executor struct {
 	pc      paniccatcher
 	running bool
 	autorun func()
-	pool    sync.Pool
+	pool    *sync.Pool
+}
+
+func (e *Executor) coroutinePool() *sync.Pool {
+	p := e.pool
+	if p == nil {
+		p = new(sync.Pool)
+		e.pool = p
+	}
+	return p
 }
 
 // Autorun sets up an autorun function to calling the Run method automatically
@@ -44,6 +53,14 @@ type Executor struct {
 func (e *Executor) Autorun(f func()) {
 	e.mu.Lock()
 	e.autorun = f
+	e.mu.Unlock()
+}
+
+// UsePool tells e to use p, rather than a new one, to cache unused coroutine
+// objects for later reuse.
+func (e *Executor) UsePool(p *sync.Pool) {
+	e.mu.Lock()
+	e.pool = p
 	e.mu.Unlock()
 }
 
