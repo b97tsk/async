@@ -12,13 +12,13 @@ import "sync"
 // The best practice is not to block.
 //
 // The internal queue is a priority queue.
-// Coroutines added in the queue are sorted by their levels
+// Coroutines added in the queue are sorted by their weights.
+// Coroutines with the same weight are sorted by their levels
 // (inner coroutines have one level higher than their outer ones).
-// Coroutines with the same level are sorted by their weights.
-// Coroutines with the same level and weight are sorted by their arrival
+// Coroutines with the same weight and level are sorted by their arrival
 // order (FIFO).
-// Popping the queue removes the first coroutine with the least level or
-// the highest weight.
+// Popping the queue removes the first coroutine with the highest weight or
+// the least level.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to

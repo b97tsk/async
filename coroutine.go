@@ -120,10 +120,10 @@ func compare[Int intType](x, y Int) int {
 }
 
 func (co *Coroutine) less(other *Coroutine) bool {
-	if c := compare(co.level, other.level); c != 0 {
-		return c == -1
+	if c := compare(co.weight, other.weight); c != 0 {
+		return c == +1
 	}
-	return co.weight > other.weight
+	return co.level < other.level
 }
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
@@ -338,6 +338,11 @@ func (inner *innerCoroutineCleanup) Cleanup() {
 	}
 }
 
+// Weight returns the weight of co.
+func (co *Coroutine) Weight() Weight {
+	return co.weight
+}
+
 // Executor returns the executor that spawned co.
 //
 // Since co can be recycled by an executor, it is recommended to save
@@ -425,27 +430,18 @@ func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, t)
 }
 
-// Spawn creates an inner coroutine with default weight to work on t.
+// Spawn creates an inner coroutine with the same weight as co to work on t.
 //
 // Inner coroutines, if not yet ended, are forcely exited when the outer one
 // resumes or ends, or when the outer one is making a transit to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
-	co.SpawnWeighted(0, t)
-}
-
-// SpawnWeighted creates an inner coroutine with weight w to work on t.
-//
-// Inner coroutines, if not yet ended, are forcely exited when the outer one
-// resumes or ends, or when the outer one is making a transit to work on
-// another task.
-func (co *Coroutine) SpawnWeighted(w Weight, t Task) {
 	level := co.level + 1
 	if level == 0 {
 		panic("async: too many levels")
 	}
 
-	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(w)
+	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
 	inner.run()
 
 	if inner.flag&flagEnded == 0 {
