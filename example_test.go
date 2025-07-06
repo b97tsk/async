@@ -443,9 +443,9 @@ func Example_cleanupFunc() {
 	// 5
 }
 
-// This example demonstrates how a coroutine can transit from one task to
+// This example demonstrates how a coroutine can transition from one task to
 // another.
-func Example_switch() {
+func Example_transition() {
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
@@ -462,11 +462,11 @@ func Example_switch() {
 			return co.Await()
 		}
 
-		return co.Transit(func(co *async.Coroutine) async.Result {
+		return co.Transition(func(co *async.Coroutine) async.Result {
 			co.Watch(&myState)
 
 			v := myState.Get()
-			fmt.Println(v, "(transited)")
+			fmt.Println(v, "(transitioned)")
 
 			if v < 5 {
 				return co.Await()
@@ -487,9 +487,9 @@ func Example_switch() {
 	// 1
 	// 2
 	// 3
-	// 3 (transited)
-	// 4 (transited)
-	// 5 (transited)
+	// 3 (transitioned)
+	// 4 (transitioned)
+	// 5 (transitioned)
 	// 7
 }
 
@@ -512,11 +512,11 @@ func ExampleTask_Then() {
 			return co.Await()
 		}
 
-		return co.Transit(func(co *async.Coroutine) async.Result {
+		return co.Transition(func(co *async.Coroutine) async.Result {
 			co.Watch(&myState)
 
 			v := myState.Get()
-			fmt.Println(v, "(transited)")
+			fmt.Println(v, "(transitioned)")
 
 			if v < 5 {
 				return co.Await()
@@ -552,9 +552,9 @@ func ExampleTask_Then() {
 	// 1 (a)
 	// 2 (a)
 	// 3 (a)
-	// 3 (transited)
-	// 4 (transited)
-	// 5 (transited)
+	// 3 (transitioned)
+	// 4 (transitioned)
+	// 5 (transitioned)
 	// 5 (b)
 	// 6 (b)
 	// 7 (b)
@@ -593,7 +593,7 @@ func ExampleAwait() {
 			}))
 		}()
 
-		return co.Transit(async.Await(&myState).Then(
+		return co.Transition(async.Await(&myState).Then(
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
 				go func() {
@@ -606,7 +606,7 @@ func ExampleAwait() {
 					}))
 				}()
 
-				return co.Transit(async.Await(&myState).Then(
+				return co.Transition(async.Await(&myState).Then(
 					async.Do(func() {
 						fmt.Println("v1 + v2 =", myState.v1+myState.v2)
 					}),
@@ -645,11 +645,11 @@ func ExampleBlock() {
 				if v := myState.Get(); v >= 7 {
 					return co.End()
 				}
-				return co.Transit(t) // Transit to t again to form a loop.
+				return co.Transition(t) // Transition to t again to form a loop.
 			},
 		)
 
-		return co.Transit(t)
+		return co.Transition(t)
 	})
 
 	for i := 1; i <= 9; i++ {
@@ -943,13 +943,13 @@ func ExampleFunc_tailcall() {
 			func(co *async.Coroutine) async.Result { // Last task in the block.
 				if n < 2000000 {
 					n++
-					return co.Transit(t) // Tail-call here.
+					return co.Transition(t) // Tail-call here.
 				}
 				return co.End()
 			},
 		))
 
-		return co.Transit(t.Then(async.Do(func() { fmt.Println(n) })))
+		return co.Transition(t.Then(async.Do(func() { fmt.Println(n) })))
 	})
 
 	// Case 2: Making tail-call anywhere.
@@ -972,7 +972,7 @@ func ExampleFunc_tailcall() {
 			async.End(),
 		))
 
-		return co.Transit(t.Then(async.Do(func() { fmt.Println(n) })))
+		return co.Transition(t.Then(async.Do(func() { fmt.Println(n) })))
 	})
 
 	// Output:
@@ -1041,7 +1041,7 @@ func ExampleJoin() {
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
-				return co.Transit(async.Await(&s1))
+				return co.Transition(async.Await(&s1))
 			},
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1051,7 +1051,7 @@ func ExampleJoin() {
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
-				return co.Transit(async.Await(&s2))
+				return co.Transition(async.Await(&s2))
 			},
 		),
 		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
@@ -1088,7 +1088,7 @@ func ExampleSelect() {
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
-				return co.Transit(async.Await(&s1))
+				return co.Transition(async.Await(&s1))
 			},
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1098,7 +1098,7 @@ func ExampleSelect() {
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
-				return co.Transit(async.Await(&s2))
+				return co.Transition(async.Await(&s2))
 			},
 		),
 		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
@@ -1133,7 +1133,7 @@ func ExampleSelect_withCancel() {
 			func(co *async.Coroutine) async.Result {
 				ctx, cancel := context.WithCancel(context.Background())
 				co.Defer(async.Do(cancel))
-				return co.Transit(async.Select(
+				return co.Transition(async.Select(
 					func(co *async.Coroutine) async.Result {
 						wg.Add(1)
 						go func() {
@@ -1146,7 +1146,7 @@ func ExampleSelect_withCancel() {
 							ans := 15
 							myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 						}()
-						return co.Transit(async.Await(&s1))
+						return co.Transition(async.Await(&s1))
 					},
 					func(co *async.Coroutine) async.Result {
 						wg.Add(1)
@@ -1160,7 +1160,7 @@ func ExampleSelect_withCancel() {
 							ans := 27
 							myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 						}()
-						return co.Transit(async.Await(&s2))
+						return co.Transition(async.Await(&s2))
 					},
 				))
 			},

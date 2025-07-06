@@ -7,13 +7,12 @@
 //
 // While Go excels at forking, async, on the other hand, excels at joining.
 //
-// # Use Case #1: Fan-in Executing Code From Numerous Goroutines
+// # Use Case 1: Fan-In Executing Code From Goroutines
 //
-// Wanted to execute pieces of code from numerous goroutines
-// in a single-threaded way?
+// Wanted to execute pieces of code from goroutines in a single-threaded way?
 //
-// An [Executor] is designed to be able to run tasks spawned in numerous
-// goroutines sequentially.
+// An [Executor] is designed to be able to run tasks spawned in goroutines
+// sequentially.
 // This comes in handy when one wants to do a series of operations
 // on a single thread, for example, to read or update states that are not
 // safe for concurrent access, to write data to the console or a file, to
@@ -25,7 +24,7 @@
 // memory over time.
 // To mitigate, one could introduce a semaphore per hot spot.
 //
-// # Use Case #2: Event-driven Reactiveness
+// # Use Case 2: Event-Driven Reactiveness
 //
 // A [Task] can be reactive.
 //
@@ -39,17 +38,18 @@
 // It works like a loop. To exit this loop, just return a Result that ends
 // the coroutine from within the task function. Simple.
 //
-// # Use Case #3: Easy State Machines
+// # Use Case 3: Easy State Machines
 //
-// A [Coroutine] can also transit from one [Task] to another, just like a state
-// machine can transit from one state to another.
+// A [Coroutine] can also make a transition from one [Task] to another, just
+// like a state machine can make a transition from one state to another.
 // This is done by returning another specific [Result] from within a task
 // function.
-// A coroutine can transit from one task to another until a task ends it.
+// A coroutine can transition from one task to another until a task ends it.
 //
-// With the ability to transit, async is able to provide more advanced control
-// structures, like [Block], [Loop] and [Func], to ease the process of writing
-// async code. The experience now feels similar to that of writing sync code.
+// With the ability to transition, async is able to provide more advanced
+// control structures, like [Block], [Loop] and [Func], to ease the process of
+// writing async code. The experience now feels similar to that of writing sync
+// code.
 //
 // # Spawning Async Tasks vs. Passing Data over Go Channels
 //

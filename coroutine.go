@@ -9,12 +9,12 @@ import (
 const (
 	doEnd = iota
 	doYield
-	doTransit
+	doTransition
 	doBreak
 	doContinue
 	doReturn
 	doExit
-	doTailTransit // Transit and remove controller.
+	doTailTransition // Do transition and remove controller.
 )
 
 const (
@@ -42,9 +42,9 @@ const (
 // A notification of such an event resumes the coroutine.
 // When a coroutine is resumed, the executor runs the coroutine again.
 //
-// A coroutine can also make a transit to work on another task according to
+// A coroutine can also make a transition to work on another task according to
 // the return value of the task function.
-// A coroutine can transit from one task to another until a task ends it.
+// A coroutine can transition from one task to another until a task ends it.
 type Coroutine struct {
 	flag        uint8
 	level       uint32
@@ -186,7 +186,7 @@ func (co *Coroutine) run() {
 			res = co.Exit()
 		}
 
-		if res.action != doYield && res.action != doTransit {
+		if res.action != doYield && res.action != doTransition {
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
@@ -194,7 +194,7 @@ func (co *Coroutine) run() {
 				if !pc.TryCatch(func() { res = c.negotiate(co, res) }) {
 					res = c.negotiate(co, co.Exit())
 				}
-				if res.action != doTransit {
+				if res.action != doTransition {
 					if c, ok := c.(Cleanup); ok {
 						c.Cleanup()
 					}
@@ -202,25 +202,25 @@ func (co *Coroutine) run() {
 					controllers = controllers[:i]
 					co.controllers = controllers
 				}
-				if res.action == doTransit || res.action == doTailTransit {
+				if res.action == doTransition || res.action == doTailTransition {
 					break
 				}
 			}
-			if res.action != doTransit && res.action != doTailTransit {
+			if res.action != doTransition && res.action != doTailTransition {
 				if !pc.TryCatch(func() { res = rootController.negotiate(co, res) }) {
 					res = rootController.negotiate(co, co.Exit())
 				}
 			}
-			if res.action == doTailTransit {
-				res.action = doTransit
+			if res.action == doTailTransition {
+				res.action = doTransition
 			}
 		}
 
-		if res.transitTo != nil {
-			co.task = res.transitTo
+		if res.task != nil {
+			co.task = res.task
 		}
 
-		if res.action != doTransit {
+		if res.action != doTransition {
 			break
 		}
 
@@ -234,7 +234,7 @@ func (co *Coroutine) run() {
 				if _, ok := lastController.(funcController); ok {
 					// Tail-call optimization:
 					// If the last controller is also a funcController, do not add another one.
-					// (doTailTransit also pays tribute to this optimization.)
+					// (doTailTransition also pays tribute to this optimization.)
 					addController = false
 				}
 			}
@@ -393,7 +393,7 @@ func (co *Coroutine) WatchSeq(seq iter.Seq[Event]) {
 // Cleanup represents any type that carries a Cleanup method.
 // A Cleanup can be added to a coroutine in a [Task] function for making
 // an effect some time later when the coroutine resumes or ends, or when
-// the coroutine is making a transit to work on another [Task].
+// the coroutine is making a transition to work on another [Task].
 type Cleanup interface {
 	Cleanup()
 }
@@ -405,7 +405,7 @@ type CleanupFunc func()
 func (f CleanupFunc) Cleanup() { f() }
 
 // Cleanup adds something to clean up when co resumes or ends, or when co is
-// making a transit to work on another [Task].
+// making a transition to work on another [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
 	if c == nil {
 		return
@@ -414,7 +414,7 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 }
 
 // CleanupFunc adds a function call when co resumes or ends, or when co is
-// making a transit to work on another [Task].
+// making a transition to work on another [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
 	if f == nil {
 		return
@@ -434,7 +434,7 @@ func (co *Coroutine) Defer(t Task) {
 // Spawn creates an inner coroutine with the same weight as co to work on t.
 //
 // Inner coroutines, if not yet ended, are forcely exited when the outer one
-// resumes or ends, or when the outer one is making a transit to work on
+// resumes or ends, or when the outer one is making a transition to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
 	level := co.level + 1
@@ -455,12 +455,13 @@ func (co *Coroutine) Spawn(t Task) {
 // A Result determines what next for a coroutine to do after running a task.
 //
 // A Result can be created by calling one of the following methods:
-//   - [Coroutine.End]: for ending a coroutine or transiting to another task;
+//   - [Coroutine.End]: for ending a coroutine or making a transition to work
+//     on another task if there are advanced control structures taking control;
 //   - [Coroutine.Await]: for yielding a coroutine with additional events to
 //     watch;
 //   - [Coroutine.Yield]: for yielding a coroutine with another task to which
-//     will be transited later when resuming;
-//   - [Coroutine.Transit]: for transiting to another task;
+//     will be transitioned later when resuming;
+//   - [Coroutine.Transition]: for making a transition to work on another task;
 //   - [Coroutine.Break]: for breaking a loop;
 //   - [Coroutine.BreakLabel]: for breaking a loop with a specific label;
 //   - [Coroutine.Continue]: for continuing a loop;
@@ -474,12 +475,13 @@ func (co *Coroutine) Spawn(t Task) {
 type Result struct {
 	action     int
 	label      Label      // used by: doBreak, doContinue
-	transitTo  Task       // used by: doYield, doTransit, doTailTransit
-	controller controller // used by: doTransit
+	task       Task       // used by: doYield, doTransition, doTailTransition
+	controller controller // used by: doTransition
 }
 
-// End returns a [Result] that will cause co to end or make a transit to work
-// on another [Task].
+// End returns a [Result] that will cause co to end, or make a transition to
+// work on another [Task] if there are advanced control structures taking
+// control.
 func (co *Coroutine) End() Result {
 	return Result{action: doEnd}
 }
@@ -513,7 +515,7 @@ func (co *Coroutine) AwaitSeq(seq iter.Seq[Event]) Result {
 }
 
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
-// make a transit to work on t instead.
+// make a transition to work on t instead.
 //
 // Yielding is not allowed when a coroutine is exiting.
 // If co is exiting, Yield panics.
@@ -521,12 +523,13 @@ func (co *Coroutine) Yield(t Task) Result {
 	if co.Exiting() {
 		panic("async: yielding while exiting")
 	}
-	return Result{action: doYield, transitTo: must(t)}
+	return Result{action: doYield, task: must(t)}
 }
 
-// Transit returns a [Result] that will cause co to make a transit to work on t.
-func (co *Coroutine) Transit(t Task) Result {
-	return Result{action: doTransit, transitTo: must(t)}
+// Transition returns a [Result] that will cause co to make a transition to
+// work on t.
+func (co *Coroutine) Transition(t Task) Result {
+	return Result{action: doTransition, task: must(t)}
 }
 
 // Break returns a [Result] that will cause co to break a loop.
@@ -581,8 +584,8 @@ type Task func(co *Coroutine) Result
 func (t Task) Then(next Task) Task {
 	return func(co *Coroutine) Result {
 		return Result{
-			action:     doTransit,
-			transitTo:  must(t),
+			action:     doTransition,
+			task:       must(t),
 			controller: &thenController{must(next)},
 		}
 	}
@@ -595,7 +598,7 @@ type thenController struct {
 func (c *thenController) negotiate(co *Coroutine, res Result) Result {
 	switch res.action {
 	case doEnd:
-		return Result{action: doTailTransit, transitTo: c.next}
+		return Result{action: doTailTransition, task: c.next}
 	default:
 		return res
 	}
@@ -649,8 +652,8 @@ func Block(s ...Task) Task {
 	}
 	return func(co *Coroutine) Result {
 		return Result{
-			action:     doTransit,
-			transitTo:  must(s[0]),
+			action:     doTransition,
+			task:       must(s[0]),
 			controller: &blockController{s[1:]},
 		}
 	}
@@ -668,11 +671,11 @@ func (c *blockController) negotiate(co *Coroutine, res Result) Result {
 		}
 		t := c.s[0]
 		c.s = c.s[1:]
-		action := doTransit
+		action := doTransition
 		if len(c.s) == 0 {
-			action = doTailTransit
+			action = doTailTransition
 		}
-		return Result{action: action, transitTo: must(t)}
+		return Result{action: action, task: must(t)}
 	default:
 		return res
 	}
@@ -732,8 +735,8 @@ func LoopN[Int intType](n Int, t Task) Task {
 func LoopLabel(l Label, t Task) Task {
 	return func(co *Coroutine) Result {
 		return Result{
-			action:     doTransit,
-			transitTo:  must(t),
+			action:     doTransition,
+			task:       must(t),
 			controller: &loopController{l, t},
 		}
 	}
@@ -753,13 +756,13 @@ func LoopLabelN[Int intType](l Label, n Int, t Task) Task {
 		u := func(co *Coroutine) Result {
 			if i < n {
 				i++
-				return co.Transit(t)
+				return co.Transition(t)
 			}
 			return co.Break()
 		}
 		return Result{
-			action:     doTransit,
-			transitTo:  u,
+			action:     doTransition,
+			task:       u,
 			controller: &loopController{l, u},
 		}
 	}
@@ -778,7 +781,7 @@ type loopController struct {
 func (c *loopController) negotiate(co *Coroutine, res Result) Result {
 	switch res.action {
 	case doEnd:
-		return co.Transit(c.t)
+		return co.Transition(c.t)
 	case doBreak:
 		switch res.label {
 		case c.l, NoLabel:
@@ -788,7 +791,7 @@ func (c *loopController) negotiate(co *Coroutine, res Result) Result {
 	case doContinue:
 		switch res.label {
 		case c.l, NoLabel:
-			return co.Transit(c.t)
+			return co.Transition(c.t)
 		}
 		return res
 	default:
@@ -822,8 +825,8 @@ func Exit() Task {
 func Func(t Task) Task {
 	return func(co *Coroutine) Result {
 		return Result{
-			action:     doTransit,
-			transitTo:  must(t),
+			action:     doTransition,
+			task:       must(t),
 			controller: funcController(len(co.defers)),
 		}
 	}
@@ -848,7 +851,7 @@ func (c funcController) negotiate(co *Coroutine, res Result) Result {
 		t := defers[i]
 		defers[i] = nil
 		co.defers = defers[:i]
-		return co.Transit(t)
+		return co.Transition(t)
 	case doBreak:
 		panic("async: unhandled break action")
 	case doContinue:
@@ -872,8 +875,8 @@ func FromSeq(seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
 		return Result{
-			action:     doTransit,
-			transitTo:  End(),
+			action:     doTransition,
+			task:       End(),
 			controller: &seqController{next, stop},
 		}
 	}
@@ -887,7 +890,7 @@ type seqController struct {
 func (c *seqController) negotiate(co *Coroutine, res Result) Result {
 	if res.action == doEnd {
 		if t, ok := c.next(); ok {
-			return co.Transit(t)
+			return co.Transition(t)
 		}
 	}
 	return res
@@ -965,7 +968,7 @@ func Join(s ...Task) Task {
 			for i, t := range tasks {
 				tasks[i] = func(co *Coroutine) Result {
 					co.Defer(done)
-					return co.Transit(t)
+					return co.Transition(t)
 				}
 			}
 			o.tasks = tasks
@@ -1003,7 +1006,7 @@ func Select(s ...Task) Task {
 			for i, t := range tasks {
 				tasks[i] = func(co *Coroutine) Result {
 					co.Defer(done)
-					return co.Transit(t)
+					return co.Transition(t)
 				}
 			}
 			o.tasks = tasks
