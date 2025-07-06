@@ -6,8 +6,11 @@ import (
 	"weak"
 )
 
+type action int
+
 const (
-	doEnd = iota
+	_ action = iota
+	doEnd
 	doYield
 	doTransition
 	doBreak
@@ -161,7 +164,7 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 	e.mu.Lock()
 }
 
-func (co *Coroutine) run() {
+func (co *Coroutine) run() action {
 	var anyPaused bool
 
 	{
@@ -266,6 +269,8 @@ func (co *Coroutine) run() {
 	if res.action != doYield {
 		co.end()
 	}
+
+	return res.action
 }
 
 func (co *Coroutine) end() {
@@ -333,8 +338,7 @@ type innerCoroutineCleanup Coroutine
 func (inner *innerCoroutineCleanup) Cleanup() {
 	inner.task = Exit()
 	inner.outer = nil
-	(*Coroutine)(inner).run()
-	if inner.flag&flagEnded == 0 {
+	if action := (*Coroutine)(inner).run(); action == doYield {
 		panic("async: inner coroutine did not end (internal error)")
 	}
 }
@@ -443,9 +447,8 @@ func (co *Coroutine) Spawn(t Task) {
 	}
 
 	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
-	inner.run()
 
-	if inner.flag&flagEnded == 0 {
+	if action := inner.run(); action == doYield {
 		inner.outer = co
 		co.cleanups = append(co.cleanups, (*innerCoroutineCleanup)(inner))
 	}
@@ -473,7 +476,7 @@ func (co *Coroutine) Spawn(t Task) {
 // a variable and overwrite it with another, before returning it. Instead,
 // one should just return a Result right after it is created.
 type Result struct {
-	action     int
+	action     action
 	label      Label      // used by: doBreak, doContinue
 	task       Task       // used by: doYield, doTransition, doTailTransition
 	controller controller // used by: doTransition
