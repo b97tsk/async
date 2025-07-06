@@ -196,7 +196,7 @@ func (co *Coroutine) run() {
 				}
 				if res.action != doTransition {
 					if c, ok := c.(Cleanup); ok {
-						c.Cleanup()
+						pc.TryCatch(c.Cleanup)
 					}
 					controllers[i] = nil
 					controllers = controllers[:i]
