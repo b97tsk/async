@@ -55,7 +55,7 @@ type Coroutine struct {
 	outer       *Coroutine
 	executor    *Executor
 	task        Task
-	deps        map[Event]bool
+	deps        map[Event]struct{}
 	cleanups    []Cleanup
 	defers      []Task
 	controllers []controller
@@ -165,22 +165,12 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 }
 
 func (co *Coroutine) run() (yielded bool) {
-	var anyPaused bool
-
-	{
-		deps := co.deps
-		for d := range deps {
-			deps[d] = false
-			d.pauseListener(co)
-		}
-		anyPaused = len(deps) != 0
-	}
-
 	var res Result
 
 	pc := &co.executor.pc
 
 	for {
+		co.clearDeps()
 		co.clearCleanups()
 
 		co.flag &^= flagStale | flagEnded
@@ -249,19 +239,6 @@ func (co *Coroutine) run() (yielded bool) {
 						panic("async: too many controllers or recursions")
 					}
 				}
-			}
-		}
-
-		co.clearDeps()
-		anyPaused = false
-	}
-
-	if res.action == doYield && anyPaused {
-		deps := co.deps
-		for d, inUse := range deps {
-			if !inUse {
-				delete(deps, d)
-				d.removeListener(co)
 			}
 		}
 	}
@@ -370,10 +347,10 @@ func (co *Coroutine) Watch(ev ...Event) {
 	for _, d := range ev {
 		deps := co.deps
 		if deps == nil {
-			deps = make(map[Event]bool)
+			deps = make(map[Event]struct{})
 			co.deps = deps
 		}
-		deps[d] = true
+		deps[d] = struct{}{}
 		d.addListener(co)
 	}
 }
@@ -387,10 +364,10 @@ func (co *Coroutine) WatchSeq(seq iter.Seq[Event]) {
 	for d := range seq {
 		deps := co.deps
 		if deps == nil {
-			deps = make(map[Event]bool)
+			deps = make(map[Event]struct{})
 			co.deps = deps
 		}
-		deps[d] = true
+		deps[d] = struct{}{}
 		d.addListener(co)
 	}
 }

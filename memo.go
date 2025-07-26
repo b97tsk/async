@@ -83,10 +83,6 @@ func (m *Memo[T]) addListener(co *Coroutine) {
 	}
 }
 
-func (m *Memo[T]) pauseListener(co *Coroutine) {
-	m.state.pauseListener(co)
-}
-
 func (m *Memo[T]) removeListener(co *Coroutine) {
 	m.state.removeListener(co)
 
