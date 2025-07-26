@@ -3,7 +3,6 @@ package async
 import (
 	"iter"
 	"slices"
-	"weak"
 )
 
 type action int
@@ -60,15 +59,10 @@ type Coroutine struct {
 	cleanups    []Cleanup
 	defers      []Task
 	controllers []controller
-	cache       map[any]cacheEntry
 }
 
 // Weight is the type of weight for use when spawning a weighted coroutine.
 type Weight int
-
-type cacheEntry interface {
-	isDead() bool
-}
 
 func (e *Executor) newCoroutine() *Coroutine {
 	if co := e.coroutinePool().Get(); co != nil {
@@ -83,7 +77,6 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		co.outer = nil
 		co.executor = nil
 		co.task = nil
-		gc(co.cache)
 		e.coroutinePool().Put(co)
 	}
 }
@@ -903,59 +896,6 @@ func (c *seqController) negotiate(co *Coroutine, res Result) Result {
 
 func (c *seqController) Cleanup() {
 	c.stop()
-}
-
-func keyFor[T any]() any {
-	type key struct{}
-	return key{}
-}
-
-func newFor[T any]() func() *T {
-	return func() *T { return new(T) }
-}
-
-type weakPointer[T any] struct {
-	weak.Pointer[T]
-}
-
-func (p weakPointer[T]) isDead() bool {
-	return p.Value() == nil
-}
-
-func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
-	cache := co.cache
-	if cache == nil {
-		cache = make(map[any]cacheEntry)
-		co.cache = cache
-	}
-	gc(cache)
-	wp, _ := cache[key].(weakPointer[T])
-	v := wp.Value()
-	if v == nil && new != nil {
-		v = new()
-		cache[key] = weakPointer[T]{weak.Make(v)}
-	}
-	return v
-}
-
-func gc(m map[any]cacheEntry) {
-	if len(m) != 0 {
-		removeRandomDeadEntries(m)
-	}
-}
-
-func removeRandomDeadEntries(m map[any]cacheEntry) {
-	const maxNonDeadEncountered = 10
-	n := 0
-	for k, v := range m {
-		if v.isDead() {
-			delete(m, k)
-			continue
-		}
-		if n++; n == maxNonDeadEncountered {
-			break
-		}
-	}
 }
 
 func resumeOuter(co *Coroutine) Result {

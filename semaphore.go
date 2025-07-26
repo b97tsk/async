@@ -1,6 +1,9 @@
 package async
 
-import "slices"
+import (
+	"slices"
+	"sync"
+)
 
 // Semaphore provides a way to bound asynchronous access to a resource.
 // The callers can request access with a given weight.
@@ -32,11 +35,10 @@ func (s *Semaphore) Acquire(n int64) Task {
 			if n > s.size {
 				return co.Await() // Impossible to success.
 			}
-			w := cacheFor[waiter](co, keyFor[waiter](), newFor[waiter]())
-			w.s, w.n = s, n
+			w := waiterPool.Get().(*waiter)
+			w.co, w.s, w.n = co, s, n
 			s.waiters = append(s.waiters, w)
 			co.Cleanup(w)
-			co.Watch(w)
 			return co.Yield(End())
 		}
 		s.cur += n
@@ -61,34 +63,40 @@ func (s *Semaphore) Release(n int64) {
 }
 
 func (s *Semaphore) notifyWaiters() {
-	i := 0
-	for i = range s.waiters {
-		w := s.waiters[i]
+	n := 0
+	for _, w := range s.waiters {
 		if s.size-s.cur < w.n {
 			break
 		}
 		s.cur += w.n
 		w.n = 0
-		w.Notify()
+		w.co.resume()
+		n++
 	}
-	s.waiters = slices.Delete(s.waiters, 0, i)
+	s.waiters = slices.Delete(s.waiters, 0, n)
 }
 
 type waiter struct {
-	Signal
-	s *Semaphore
-	n int64
+	co *Coroutine
+	s  *Semaphore
+	n  int64
 }
 
 func (w *waiter) Cleanup() {
 	if w.n != 0 {
 		w.s.removeWaiter(w)
 	}
+	w.co = nil
 	w.s = nil
+	waiterPool.Put(w)
 }
 
 func (s *Semaphore) removeWaiter(w *waiter) {
 	if i := slices.Index(s.waiters, w); i != -1 {
 		s.waiters = slices.Delete(s.waiters, i, i+1)
 	}
+}
+
+var waiterPool = sync.Pool{
+	New: func() any { return new(waiter) },
 }
