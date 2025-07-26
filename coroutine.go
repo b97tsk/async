@@ -532,7 +532,7 @@ func (co *Coroutine) Transition(t Task) Result {
 
 // Break returns a [Result] that will cause co to break a loop.
 func (co *Coroutine) Break() Result {
-	return co.BreakLabel(NoLabel)
+	return co.BreakLabel(nil)
 }
 
 // BreakLabel returns a [Result] that will cause co to break a loop with label
@@ -543,7 +543,7 @@ func (co *Coroutine) BreakLabel(l Label) Result {
 
 // Continue returns a [Result] that will cause co to continue a loop.
 func (co *Coroutine) Continue() Result {
-	return co.ContinueLabel(NoLabel)
+	return co.ContinueLabel(nil)
 }
 
 // ContinueLabel returns a [Result] that will cause co to continue a loop with
@@ -696,15 +696,16 @@ func ContinueLabel(l Label) Task {
 	}
 }
 
-const NoLabel Label = ""
-
-type Label string
+// Label is the type of label for use when creating a labeled loop.
+//
+// A label must be comparable.
+type Label any
 
 // Loop returns a [Task] that forms a loop, which would run t repeatedly.
 // Both [Coroutine.Break] and [Break] can break this loop early.
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
 func Loop(t Task) Task {
-	return LoopLabel(NoLabel, t)
+	return LoopLabel(nil, t)
 }
 
 // LoopN returns a [Task] that forms a loop, which would run t repeatedly
@@ -712,7 +713,7 @@ func Loop(t Task) Task {
 // Both [Coroutine.Break] and [Break] can break this loop early.
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
 func LoopN[Int intType](n Int, t Task) Task {
-	return LoopLabelN(NoLabel, n, t)
+	return LoopLabelN(nil, n, t)
 }
 
 // LoopLabel returns a [Task] that forms a loop with label l, which would
@@ -775,13 +776,13 @@ func (c *loopController) negotiate(co *Coroutine, res Result) Result {
 		return co.Transition(c.t)
 	case doBreak:
 		switch res.label {
-		case c.l, NoLabel:
+		case nil, c.l:
 			return co.End()
 		}
 		return res
 	case doContinue:
 		switch res.label {
-		case c.l, NoLabel:
+		case nil, c.l:
 			return co.Transition(c.t)
 		}
 		return res
