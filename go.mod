@@ -2,4 +2,4 @@ module github.com/b97tsk/async
 
 go 1.23.0
 
-retract [v0.1.0, v0.8.0]
+retract [v0.1.0, v0.9.0]
