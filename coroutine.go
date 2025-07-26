@@ -26,6 +26,7 @@ const (
 	flagEnded
 	flagRecyclable
 	flagRecycled
+	flagManaged
 	flagExiting
 )
 
@@ -79,6 +80,7 @@ func (e *Executor) newCoroutine() *Coroutine {
 func (e *Executor) freeCoroutine(co *Coroutine) {
 	if co.flag&(flagRecyclable|flagRecycled) == flagRecyclable {
 		co.flag |= flagRecycled
+		co.outer = nil
 		co.executor = nil
 		co.task = nil
 		gc(co.cache)
@@ -125,6 +127,13 @@ func (co *Coroutine) less(other *Coroutine) bool {
 		return c == +1
 	}
 	return co.level < other.level
+}
+
+func (co *Coroutine) resume() {
+	e := co.executor
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.resumeCoroutine(co)
 }
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
@@ -280,7 +289,7 @@ func (co *Coroutine) end() {
 
 	co.clearDeps()
 	co.clearCleanups()
-	co.removeFromParent()
+	co.removeFromOuter()
 
 	if len(co.defers) != 0 {
 		panic("async: not all deferred tasks are handled (internal error)")
@@ -317,25 +326,24 @@ func (co *Coroutine) clearCleanups() {
 	co.cleanups = cleanups[:0]
 }
 
-func (co *Coroutine) removeFromParent() {
-	outer := co.outer
-	if outer == nil {
+func (co *Coroutine) removeFromOuter() {
+	if co.flag&flagManaged == 0 {
 		return
 	}
+	outer := co.outer
 	for i, c := range outer.cleanups {
 		if c == (*innerCoroutineCleanup)(co) {
 			outer.cleanups = slices.Delete(outer.cleanups, i, i+1)
 			break
 		}
 	}
-	co.outer = nil
 }
 
 type innerCoroutineCleanup Coroutine
 
 func (inner *innerCoroutineCleanup) Cleanup() {
 	inner.task = Exit()
-	inner.outer = nil
+	inner.flag &^= flagManaged
 	if yielded := (*Coroutine)(inner).run(); yielded {
 		panic("async: inner coroutine did not end (internal error)")
 	}
@@ -354,6 +362,11 @@ func (co *Coroutine) Executor() *Executor {
 // Exiting reports whether co is exiting.
 func (co *Coroutine) Exiting() bool {
 	return co.flag&flagExiting != 0
+}
+
+// Resumed reports whether co has been resumed.
+func (co *Coroutine) Resumed() bool {
+	return co.flag&flagResumed != 0
 }
 
 // Watch watches some events so that, when any of them notifies, co resumes.
@@ -442,9 +455,10 @@ func (co *Coroutine) Spawn(t Task) {
 	}
 
 	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
+	inner.outer = co
 
 	if yielded := inner.run(); yielded {
-		inner.outer = co
+		inner.flag |= flagManaged
 		co.cleanups = append(co.cleanups, (*innerCoroutineCleanup)(inner))
 	}
 }
@@ -944,35 +958,27 @@ func removeRandomDeadEntries(m map[any]cacheEntry) {
 	}
 }
 
+func resumeOuter(co *Coroutine) Result {
+	co.outer.resume()
+	return co.End()
+}
+
 // Join returns a [Task] that runs each of the given tasks in an inner
 // coroutine and awaits until all of them complete, and then ends.
 func Join(s ...Task) Task {
-	key := new(int)
 	return func(co *Coroutine) Result {
-		type object struct {
-			wg    WaitGroup
-			tasks []Task
+		n := len(s)
+		done := func(co *Coroutine) Result {
+			if n--; n == 0 {
+				co.outer.resume()
+			}
+			return co.End()
 		}
-		o := cacheFor[object](co, key, func() *object {
-			o := new(object)
-			done := func(co *Coroutine) Result {
-				o.wg.Done()
-				return co.End()
-			}
-			tasks := slices.Clone(s)
-			for i, t := range tasks {
-				tasks[i] = func(co *Coroutine) Result {
-					co.Defer(done)
-					return co.Transition(t)
-				}
-			}
-			o.tasks = tasks
-			return o
-		})
-		co.Watch(&o.wg)
-		o.wg.Add(len(o.tasks))
-		for _, t := range o.tasks {
-			co.Spawn(t)
+		for _, t := range s {
+			co.Spawn(func(co *Coroutine) Result {
+				co.Defer(done)
+				return co.Transition(t)
+			})
 		}
 		return co.Yield(End())
 	}
@@ -983,35 +989,17 @@ func Join(s ...Task) Task {
 // When Select ends, tasks other than the one that completes are forcely
 // exited.
 func Select(s ...Task) Task {
-	key := new(int)
-	return func(co *Coroutine) Result {
-		type object struct {
-			sig   Signal
-			done  bool
-			tasks []Task
+	z := slices.Clone(s)
+	for i, t := range z {
+		z[i] = func(co *Coroutine) Result {
+			co.Defer(resumeOuter)
+			return co.Transition(t)
 		}
-		o := cacheFor[object](co, key, func() *object {
-			o := new(object)
-			done := func(co *Coroutine) Result {
-				o.sig.Notify()
-				o.done = true
-				return co.End()
-			}
-			tasks := slices.Clone(s)
-			for i, t := range tasks {
-				tasks[i] = func(co *Coroutine) Result {
-					co.Defer(done)
-					return co.Transition(t)
-				}
-			}
-			o.tasks = tasks
-			return o
-		})
-		co.Watch(&o.sig)
-		o.done = false
-		for _, t := range o.tasks {
+	}
+	return func(co *Coroutine) Result {
+		for _, t := range z {
 			co.Spawn(t)
-			if o.done {
+			if co.Resumed() {
 				break
 			}
 		}
