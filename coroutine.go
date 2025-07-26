@@ -10,9 +10,9 @@ type action int
 
 const (
 	_ action = iota
-	doEnd
 	doYield
 	doTransition
+	doEnd
 	doBreak
 	doContinue
 	doReturn
@@ -81,9 +81,7 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		co.flag |= flagRecycled
 		co.executor = nil
 		co.task = nil
-		if len(co.cache) != 0 {
-			removeRandomDeadEntries(co.cache)
-		}
+		gc(co.cache)
 		e.coroutinePool().Put(co)
 	}
 }
@@ -164,7 +162,7 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 	e.mu.Lock()
 }
 
-func (co *Coroutine) run() action {
+func (co *Coroutine) run() (yielded bool) {
 	var anyPaused bool
 
 	{
@@ -270,7 +268,7 @@ func (co *Coroutine) run() action {
 		co.end()
 	}
 
-	return res.action
+	return res.action == doYield
 }
 
 func (co *Coroutine) end() {
@@ -338,7 +336,7 @@ type innerCoroutineCleanup Coroutine
 func (inner *innerCoroutineCleanup) Cleanup() {
 	inner.task = Exit()
 	inner.outer = nil
-	if action := (*Coroutine)(inner).run(); action == doYield {
+	if yielded := (*Coroutine)(inner).run(); yielded {
 		panic("async: inner coroutine did not end (internal error)")
 	}
 }
@@ -349,9 +347,6 @@ func (co *Coroutine) Weight() Weight {
 }
 
 // Executor returns the executor that spawned co.
-//
-// Since co can be recycled by an executor, it is recommended to save
-// the return value in a variable first.
 func (co *Coroutine) Executor() *Executor {
 	return co.executor
 }
@@ -448,7 +443,7 @@ func (co *Coroutine) Spawn(t Task) {
 
 	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
 
-	if action := inner.run(); action == doYield {
+	if yielded := inner.run(); yielded {
 		inner.outer = co
 		co.cleanups = append(co.cleanups, (*innerCoroutineCleanup)(inner))
 	}
@@ -477,9 +472,9 @@ func (co *Coroutine) Spawn(t Task) {
 // one should just return a Result right after it is created.
 type Result struct {
 	action     action
-	label      Label      // used by: doBreak, doContinue
 	task       Task       // used by: doYield, doTransition, doTailTransition
 	controller controller // used by: doTransition
+	label      Label      // used by: doBreak, doContinue
 }
 
 // End returns a [Result] that will cause co to end, or make a transition to
@@ -599,12 +594,10 @@ type thenController struct {
 }
 
 func (c *thenController) negotiate(co *Coroutine, res Result) Result {
-	switch res.action {
-	case doEnd:
-		return Result{action: doTailTransition, task: c.next}
-	default:
+	if res.action != doEnd {
 		return res
 	}
+	return Result{action: doTailTransition, task: c.next}
 }
 
 // Do returns a [Task] that calls f, and then ends.
@@ -667,21 +660,16 @@ type blockController struct {
 }
 
 func (c *blockController) negotiate(co *Coroutine, res Result) Result {
-	switch res.action {
-	case doEnd:
-		if len(c.s) == 0 {
-			return co.End()
-		}
-		t := c.s[0]
-		c.s = c.s[1:]
-		action := doTransition
-		if len(c.s) == 0 {
-			action = doTailTransition
-		}
-		return Result{action: action, task: must(t)}
-	default:
+	if res.action != doEnd || len(c.s) == 0 {
 		return res
 	}
+	t := c.s[0]
+	c.s = c.s[1:]
+	action := doTransition
+	if len(c.s) == 0 {
+		action = doTailTransition
+	}
+	return Result{action: action, task: must(t)}
 }
 
 // Break returns a [Task] that breaks a loop.
@@ -843,18 +831,17 @@ type funcController int
 func (c funcController) negotiate(co *Coroutine, res Result) Result {
 	switch res.action {
 	case doEnd, doReturn, doExit:
-		defers := co.defers
-		if len(defers) == int(c) {
-			if co.Exiting() {
-				return co.Exit()
-			}
-			return co.End()
+		if defers := co.defers; int(c) < len(defers) {
+			i := len(defers) - 1
+			t := defers[i]
+			defers[i] = nil
+			co.defers = defers[:i]
+			return co.Transition(t)
 		}
-		i := len(defers) - 1
-		t := defers[i]
-		defers[i] = nil
-		co.defers = defers[:i]
-		return co.Transition(t)
+		if co.Exiting() {
+			return co.Exit()
+		}
+		return co.End()
 	case doBreak:
 		panic("async: unhandled break action")
 	case doContinue:
@@ -926,9 +913,7 @@ func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
 		cache = make(map[any]cacheEntry)
 		co.cache = cache
 	}
-	if len(cache) != 0 {
-		removeRandomDeadEntries(cache)
-	}
+	gc(cache)
 	wp, _ := cache[key].(weakPointer[T])
 	v := wp.Value()
 	if v == nil && new != nil {
@@ -936,6 +921,12 @@ func cacheFor[T any](co *Coroutine, key any, new func() *T) *T {
 		cache[key] = weakPointer[T]{weak.Make(v)}
 	}
 	return v
+}
+
+func gc(m map[any]cacheEntry) {
+	if len(m) != 0 {
+		removeRandomDeadEntries(m)
+	}
 }
 
 func removeRandomDeadEntries(m map[any]cacheEntry) {
@@ -1020,7 +1011,7 @@ func Select(s ...Task) Task {
 		for _, t := range o.tasks {
 			co.Spawn(t)
 			if o.done {
-				return co.End()
+				break
 			}
 		}
 		return co.Yield(End())
