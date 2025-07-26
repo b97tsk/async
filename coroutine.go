@@ -923,3 +923,18 @@ func Select(s ...Task) Task {
 		return co.Yield(End())
 	}
 }
+
+// Enclose returns a [Task] that runs t in an inner coroutine and awaits until
+// t completes, and then ends.
+//
+// Enclose(t) is equivalent to Join(t) or Select(t), but cheaper and clearer.
+func Enclose(t Task) Task {
+	u := func(co *Coroutine) Result {
+		co.Defer(resumeOuter)
+		return co.Transition(t)
+	}
+	return func(co *Coroutine) Result {
+		co.Spawn(u)
+		return co.Yield(End())
+	}
+}

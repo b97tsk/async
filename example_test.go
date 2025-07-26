@@ -1173,3 +1173,20 @@ func ExampleSelect_withCancel() {
 	// Output:
 	// s1 + s2 = 15
 }
+
+func ExampleEnclose() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	// Exit (async.Exit or (*async.Coroutine).Exit) causes the coroutine that runs it to exit.
+	// Tasks after Exit do not run.
+	myExecutor.Spawn(async.Exit().Then(async.Do(func() { fmt.Println("after Exit") })))
+
+	// With the help of async.Enclose, Exit only affects inner coroutines.
+	// The outer one continues to run tasks after async.Enclose.
+	myExecutor.Spawn(async.Enclose(async.Exit()).Then(async.Do(func() { fmt.Println("after Enclose") })))
+
+	// Output:
+	// after Enclose
+}
