@@ -21,7 +21,7 @@ const (
 
 const (
 	flagStale = 1 << iota
-	flagResumed
+	flagEnqueued
 	flagEnded
 	flagRecyclable
 	flagRecycled
@@ -135,19 +135,19 @@ func (e *Executor) resumeCoroutine(co *Coroutine) {
 		return
 	}
 
-	if flag&flagResumed != 0 {
+	if flag&flagEnqueued != 0 {
 		co.flag = flag | flagStale
 		return
 	}
 
-	co.flag = flag | flagStale | flagResumed
+	co.flag = flag | flagStale | flagEnqueued
 
 	e.pq.Push(co)
 }
 
 func (e *Executor) runCoroutine(co *Coroutine) {
 	flag := co.flag
-	flag &^= flagResumed
+	flag &^= flagEnqueued
 	co.flag = flag
 
 	if flag&flagEnded != 0 {
@@ -269,7 +269,7 @@ func (co *Coroutine) end() {
 		panic("async: not all controllers are handled (internal error)")
 	}
 
-	if co.flag&flagResumed == 0 {
+	if co.flag&flagEnqueued == 0 {
 		co.executor.freeCoroutine(co)
 	}
 }
@@ -336,7 +336,7 @@ func (co *Coroutine) Exiting() bool {
 
 // Resumed reports whether co has been resumed.
 func (co *Coroutine) Resumed() bool {
-	return co.flag&flagResumed != 0
+	return co.flag&flagEnqueued != 0
 }
 
 // Watch watches some events so that, when any of them notifies, co resumes.
