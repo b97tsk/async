@@ -20,7 +20,7 @@ const (
 )
 
 const (
-	flagStale = 1 << iota
+	flagResumed = 1 << iota
 	flagEnqueued
 	flagEnded
 	flagRecyclable
@@ -82,7 +82,7 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 }
 
 func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
-	co.flag = flagStale
+	co.flag = flagResumed
 	co.level = 0
 	co.weight = 0
 	co.executor = e
@@ -136,11 +136,11 @@ func (e *Executor) resumeCoroutine(co *Coroutine) {
 	}
 
 	if flag&flagEnqueued != 0 {
-		co.flag = flag | flagStale
+		co.flag = flag | flagResumed
 		return
 	}
 
-	co.flag = flag | flagStale | flagEnqueued
+	co.flag = flag | flagResumed | flagEnqueued
 
 	e.pq.Push(co)
 }
@@ -155,7 +155,7 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 		return
 	}
 
-	if flag&flagStale == 0 {
+	if flag&flagResumed == 0 {
 		return
 	}
 
@@ -173,7 +173,7 @@ func (co *Coroutine) run() (yielded bool) {
 		co.clearDeps()
 		co.clearCleanups()
 
-		co.flag &^= flagStale | flagEnded
+		co.flag &^= flagResumed | flagEnded
 
 		if !pc.TryCatch(func() { res = co.task(co) }) {
 			res = co.Exit()
