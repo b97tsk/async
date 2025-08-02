@@ -336,7 +336,7 @@ func (co *Coroutine) Exiting() bool {
 
 // Resumed reports whether co has been resumed.
 func (co *Coroutine) Resumed() bool {
-	return co.flag&flagEnqueued != 0
+	return co.flag&flagResumed != 0
 }
 
 // Watch watches some events so that, when any of them notifies, co resumes.
