@@ -17,7 +17,7 @@ import (
 // The internal queue is a priority queue.
 // Coroutines added in the queue are sorted by their weights.
 // Coroutines with the same weight are sorted by their levels
-// (inner coroutines have one level higher than their outer ones).
+// (child coroutines have one level higher than their parent ones).
 // Coroutines with the same weight and level are sorted by their arrival
 // order (FIFO).
 // Popping the queue removes the first coroutine with the highest weight or

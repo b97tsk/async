@@ -35,8 +35,8 @@ func Example() {
 
 		switch op.Get() {
 		case '+':
-			// Using an inner coroutine to narrow down what has to react whenever a state changes might be a good idea.
-			// The following creates an inner coroutine, it runs immediately and re-runs whenever s1 or s2 changes.
+			// Using a child coroutine to narrow down what has to react whenever a state changes might be a good idea.
+			// The following creates a child coroutine, it runs immediately and re-runs whenever s1 or s2 changes.
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", s1.Get()+s2.Get())
 				return co.Await(s1, s2) // Watches s1 and s2, and awaits.
@@ -1183,8 +1183,8 @@ func ExampleEnclose() {
 	// Tasks after Exit do not run.
 	myExecutor.Spawn(async.Exit().Then(async.Do(func() { fmt.Println("after Exit") })))
 
-	// With the help of async.Enclose, Exit only affects inner coroutines.
-	// The outer one continues to run tasks after async.Enclose.
+	// With the help of async.Enclose, Exit only affects child coroutines.
+	// The parent one continues to run tasks after async.Enclose.
 	myExecutor.Spawn(async.Enclose(async.Exit()).Then(async.Do(func() { fmt.Println("after Enclose") })))
 
 	// Output:

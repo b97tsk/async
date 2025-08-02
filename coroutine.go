@@ -52,7 +52,7 @@ type Coroutine struct {
 	flag        uint8
 	level       uint32
 	weight      Weight
-	outer       *Coroutine
+	parent      *Coroutine
 	executor    *Executor
 	task        Task
 	deps        map[Event]struct{}
@@ -74,7 +74,7 @@ func (e *Executor) newCoroutine() *Coroutine {
 func (e *Executor) freeCoroutine(co *Coroutine) {
 	if co.flag&(flagRecyclable|flagRecycled) == flagRecyclable {
 		co.flag |= flagRecycled
-		co.outer = nil
+		co.parent = nil
 		co.executor = nil
 		co.task = nil
 		e.coroutinePool().Put(co)
@@ -259,7 +259,7 @@ func (co *Coroutine) end() {
 
 	co.clearDeps()
 	co.clearCleanups()
-	co.removeFromOuter()
+	co.removeFromParent()
 
 	if len(co.defers) != 0 {
 		panic("async: not all deferred tasks are handled (internal error)")
@@ -296,26 +296,26 @@ func (co *Coroutine) clearCleanups() {
 	co.cleanups = cleanups[:0]
 }
 
-func (co *Coroutine) removeFromOuter() {
+func (co *Coroutine) removeFromParent() {
 	if co.flag&flagManaged == 0 {
 		return
 	}
-	outer := co.outer
-	for i, c := range outer.cleanups {
-		if c == (*innerCoroutineCleanup)(co) {
-			outer.cleanups = slices.Delete(outer.cleanups, i, i+1)
+	parent := co.parent
+	for i, c := range parent.cleanups {
+		if c == (*childCoroutineCleanup)(co) {
+			parent.cleanups = slices.Delete(parent.cleanups, i, i+1)
 			break
 		}
 	}
 }
 
-type innerCoroutineCleanup Coroutine
+type childCoroutineCleanup Coroutine
 
-func (inner *innerCoroutineCleanup) Cleanup() {
-	inner.task = Exit()
-	inner.flag &^= flagManaged
-	if yielded := (*Coroutine)(inner).run(); yielded {
-		panic("async: inner coroutine did not end (internal error)")
+func (child *childCoroutineCleanup) Cleanup() {
+	child.task = Exit()
+	child.flag &^= flagManaged
+	if yielded := (*Coroutine)(child).run(); yielded {
+		panic("async: child coroutine did not end (internal error)")
 	}
 }
 
@@ -413,10 +413,10 @@ func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, t)
 }
 
-// Spawn creates an inner coroutine with the same weight as co to work on t.
+// Spawn creates a child coroutine with the same weight as co to work on t.
 //
-// Inner coroutines, if not yet ended, are forcely exited when the outer one
-// resumes or ends, or when the outer one is making a transition to work on
+// Child coroutines, if not yet ended, are forcely exited when the parent one
+// resumes or ends, or when the parent one is making a transition to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
 	level := co.level + 1
@@ -424,12 +424,12 @@ func (co *Coroutine) Spawn(t Task) {
 		panic("async: too many levels")
 	}
 
-	inner := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
-	inner.outer = co
+	child := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
+	child.parent = co
 
-	if yielded := inner.run(); yielded {
-		inner.flag |= flagManaged
-		co.cleanups = append(co.cleanups, (*innerCoroutineCleanup)(inner))
+	if yielded := child.run(); yielded {
+		child.flag |= flagManaged
+		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))
 	}
 }
 
@@ -875,19 +875,19 @@ func (c *seqController) Cleanup() {
 	c.stop()
 }
 
-func resumeOuter(co *Coroutine) Result {
-	co.outer.resume()
+func resumeParent(co *Coroutine) Result {
+	co.parent.resume()
 	return co.End()
 }
 
-// Join returns a [Task] that runs each of the given tasks in an inner
+// Join returns a [Task] that runs each of the given tasks in a child
 // coroutine and awaits until all of them complete, and then ends.
 func Join(s ...Task) Task {
 	return func(co *Coroutine) Result {
 		n := len(s)
 		done := func(co *Coroutine) Result {
 			if n--; n == 0 {
-				co.outer.resume()
+				co.parent.resume()
 			}
 			return co.End()
 		}
@@ -901,7 +901,7 @@ func Join(s ...Task) Task {
 	}
 }
 
-// Select returns a [Task] that runs each of the given tasks in an inner
+// Select returns a [Task] that runs each of the given tasks in a child
 // coroutine and awaits until any of them completes, and then ends.
 // When Select ends, tasks other than the one that completes are forcely
 // exited.
@@ -909,7 +909,7 @@ func Select(s ...Task) Task {
 	z := slices.Clone(s)
 	for i, t := range z {
 		z[i] = func(co *Coroutine) Result {
-			co.Defer(resumeOuter)
+			co.Defer(resumeParent)
 			return co.Transition(t)
 		}
 	}
@@ -924,13 +924,13 @@ func Select(s ...Task) Task {
 	}
 }
 
-// Enclose returns a [Task] that runs t in an inner coroutine and awaits until
+// Enclose returns a [Task] that runs t in a child coroutine and awaits until
 // t completes, and then ends.
 //
 // Enclose(t) is equivalent to Join(t) or Select(t), but cheaper and clearer.
 func Enclose(t Task) Task {
 	u := func(co *Coroutine) Result {
-		co.Defer(resumeOuter)
+		co.Defer(resumeParent)
 		return co.Transition(t)
 	}
 	return func(co *Coroutine) Result {
