@@ -70,7 +70,7 @@ func (s *Semaphore) notifyWaiters() {
 		}
 		s.cur += w.n
 		w.n = 0
-		w.co.resume()
+		w.co.Resume()
 		n++
 	}
 	s.waiters = slices.Delete(s.waiters, 0, n)

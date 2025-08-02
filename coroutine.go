@@ -122,7 +122,8 @@ func (co *Coroutine) less(other *Coroutine) bool {
 	return co.level < other.level
 }
 
-func (co *Coroutine) resume() {
+// Resume resumes co.
+func (co *Coroutine) Resume() {
 	e := co.executor
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -322,6 +323,11 @@ func (child *childCoroutineCleanup) Cleanup() {
 // Weight returns the weight of co.
 func (co *Coroutine) Weight() Weight {
 	return co.weight
+}
+
+// Parent returns the parent coroutine of co.
+func (co *Coroutine) Parent() *Coroutine {
+	return co.parent
 }
 
 // Executor returns the executor that spawned co.
@@ -876,7 +882,7 @@ func (c *seqController) Cleanup() {
 }
 
 func resumeParent(co *Coroutine) Result {
-	co.parent.resume()
+	co.Parent().Resume()
 	return co.End()
 }
 
@@ -887,7 +893,7 @@ func Join(s ...Task) Task {
 		n := len(s)
 		done := func(co *Coroutine) Result {
 			if n--; n == 0 {
-				co.parent.resume()
+				co.Parent().Resume()
 			}
 			return co.End()
 		}
