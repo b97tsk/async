@@ -355,23 +355,6 @@ func (co *Coroutine) Watch(ev ...Event) {
 	}
 }
 
-// WatchSeq watches a sequence of events from seq so that, when any of them
-// notifies, co resumes.
-func (co *Coroutine) WatchSeq(seq iter.Seq[Event]) {
-	if co.Exiting() {
-		return
-	}
-	for d := range seq {
-		deps := co.deps
-		if deps == nil {
-			deps = make(map[Event]struct{})
-			co.deps = deps
-		}
-		deps[d] = struct{}{}
-		d.addListener(co)
-	}
-}
-
 // Cleanup represents any type that carries a Cleanup method.
 // A Cleanup can be added to a coroutine in a [Task] function for making
 // an effect some time later when the coroutine resumes or ends, or when
@@ -480,19 +463,6 @@ func (co *Coroutine) Await(ev ...Event) Result {
 	return Result{action: doYield}
 }
 
-// AwaitSeq returns a [Result] that will cause co to yield.
-// AwaitSeq also accepts a sequence of events from seq to watch.
-//
-// Yielding is not allowed when a coroutine is exiting.
-// If co is exiting, AwaitSeq panics.
-func (co *Coroutine) AwaitSeq(seq iter.Seq[Event]) Result {
-	if co.Exiting() {
-		panic("async: yielding while exiting")
-	}
-	co.WatchSeq(seq)
-	return Result{action: doYield}
-}
-
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
 // make a transition to work on t instead.
 //
@@ -590,16 +560,6 @@ func Await(ev ...Event) Task {
 		if len(ev) != 0 {
 			co.Watch(ev...)
 		}
-		return co.Yield(End())
-	}
-}
-
-// AwaitSeq returns a [Task] that awaits a sequence of events from seq until
-// any of them notifies, and then ends.
-// If seq is empty, AwaitSeq returns a [Task] that never ends.
-func AwaitSeq(seq iter.Seq[Event]) Task {
-	return func(co *Coroutine) Result {
-		co.WatchSeq(seq)
 		return co.Yield(End())
 	}
 }
