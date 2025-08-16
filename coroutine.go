@@ -445,9 +445,7 @@ func (co *Coroutine) Spawn(t Task) {
 //     will be transitioned later when resuming;
 //   - [Coroutine.Transition]: for making a transition to work on another task;
 //   - [Coroutine.Break]: for breaking a loop;
-//   - [Coroutine.BreakLabel]: for breaking a loop with a specific label;
 //   - [Coroutine.Continue]: for continuing a loop;
-//   - [Coroutine.ContinueLabel]: for continuing a loop with a specific label;
 //   - [Coroutine.Return]: for returning from a [Func];
 //   - [Coroutine.Exit]: for exiting a coroutine.
 //
@@ -458,7 +456,6 @@ type Result struct {
 	action     action
 	task       Task       // used by: doYield, doTransition, doTailTransition
 	controller controller // used by: doTransition
-	label      Label      // used by: doBreak, doContinue
 }
 
 // End returns a [Result] that will cause co to end, or make a transition to
@@ -516,24 +513,12 @@ func (co *Coroutine) Transition(t Task) Result {
 
 // Break returns a [Result] that will cause co to break a loop.
 func (co *Coroutine) Break() Result {
-	return co.BreakLabel(nil)
-}
-
-// BreakLabel returns a [Result] that will cause co to break a loop with label
-// l.
-func (co *Coroutine) BreakLabel(l Label) Result {
-	return Result{action: doBreak, label: l}
+	return Result{action: doBreak}
 }
 
 // Continue returns a [Result] that will cause co to continue a loop.
 func (co *Coroutine) Continue() Result {
-	return co.ContinueLabel(nil)
-}
-
-// ContinueLabel returns a [Result] that will cause co to continue a loop with
-// label l.
-func (co *Coroutine) ContinueLabel(l Label) Result {
-	return Result{action: doContinue, label: l}
+	return Result{action: doContinue}
 }
 
 // Return returns a [Result] that will cause co to return from a [Func].
@@ -661,35 +646,22 @@ func Break() Task {
 	return (*Coroutine).Break
 }
 
-// BreakLabel returns a [Task] that breaks a loop with label l.
-func BreakLabel(l Label) Task {
-	return func(co *Coroutine) Result {
-		return co.BreakLabel(l)
-	}
-}
-
 // Continue returns a [Task] that continues a loop.
 func Continue() Task {
 	return (*Coroutine).Continue
 }
 
-// ContinueLabel returns a [Task] that continues a loop with label l.
-func ContinueLabel(l Label) Task {
-	return func(co *Coroutine) Result {
-		return co.ContinueLabel(l)
-	}
-}
-
-// Label is the type of label for use when creating a labeled loop.
-//
-// A label must be comparable.
-type Label any
-
 // Loop returns a [Task] that forms a loop, which would run t repeatedly.
 // Both [Coroutine.Break] and [Break] can break this loop early.
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
 func Loop(t Task) Task {
-	return LoopLabel(nil, t)
+	return func(co *Coroutine) Result {
+		return Result{
+			action:     doTransition,
+			task:       must(t),
+			controller: &loopController{t},
+		}
+	}
 }
 
 // LoopN returns a [Task] that forms a loop, which would run t repeatedly
@@ -697,39 +669,9 @@ func Loop(t Task) Task {
 // Both [Coroutine.Break] and [Break] can break this loop early.
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
 func LoopN[Int intType](n Int, t Task) Task {
-	return LoopLabelN(nil, n, t)
-}
-
-// LoopLabel returns a [Task] that forms a loop with label l, which would
-// run t repeatedly.
-// Both [Coroutine.Break] and [Break] can break this loop early.
-// Both [Coroutine.Continue] and [Continue] can continue this loop early.
-// Both [Coroutine.BreakLabel] and [BreakLabel], with label l, can
-// break this loop early.
-// Both [Coroutine.ContinueLabel] and [ContinueLabel], with label l, can
-// continue this loop early.
-func LoopLabel(l Label, t Task) Task {
-	return func(co *Coroutine) Result {
-		return Result{
-			action:     doTransition,
-			task:       must(t),
-			controller: &loopController{l, t},
-		}
-	}
-}
-
-// LoopLabelN returns a [Task] that forms a loop with label l, which would
-// run t repeatedly for n times.
-// Both [Coroutine.Break] and [Break] can break this loop early.
-// Both [Coroutine.Continue] and [Continue] can continue this loop early.
-// Both [Coroutine.BreakLabel] and [BreakLabel], with label l, can
-// break this loop early.
-// Both [Coroutine.ContinueLabel] and [ContinueLabel], with label l, can
-// continue this loop early.
-func LoopLabelN[Int intType](l Label, n Int, t Task) Task {
 	return func(co *Coroutine) Result {
 		i := Int(0)
-		u := func(co *Coroutine) Result {
+		f := func(co *Coroutine) Result {
 			if i < n {
 				i++
 				return co.Transition(t)
@@ -738,8 +680,8 @@ func LoopLabelN[Int intType](l Label, n Int, t Task) Task {
 		}
 		return Result{
 			action:     doTransition,
-			task:       u,
-			controller: &loopController{l, u},
+			task:       f,
+			controller: &loopController{f},
 		}
 	}
 }
@@ -750,7 +692,6 @@ type intType interface {
 }
 
 type loopController struct {
-	l Label
 	t Task
 }
 
@@ -759,17 +700,9 @@ func (c *loopController) negotiate(co *Coroutine, res Result) Result {
 	case doEnd:
 		return co.Transition(c.t)
 	case doBreak:
-		switch res.label {
-		case nil, c.l:
-			return co.End()
-		}
-		return res
+		return co.End()
 	case doContinue:
-		switch res.label {
-		case nil, c.l:
-			return co.Transition(c.t)
-		}
-		return res
+		return co.Transition(c.t)
 	default:
 		return res
 	}
