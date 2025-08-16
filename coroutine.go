@@ -244,16 +244,8 @@ func (co *Coroutine) run() (yielded bool) {
 		}
 	}
 
-	if res.action != doYield {
-		co.end()
-	}
-
-	return res.action == doYield
-}
-
-func (co *Coroutine) end() {
-	if co.flag&flagEnded != 0 {
-		return
+	if res.action == doYield {
+		return true
 	}
 
 	co.flag |= flagEnded
@@ -273,6 +265,8 @@ func (co *Coroutine) end() {
 	if co.flag&flagEnqueued == 0 {
 		co.executor.freeCoroutine(co)
 	}
+
+	return false
 }
 
 func (co *Coroutine) clearDeps() {
