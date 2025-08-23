@@ -457,6 +457,31 @@ func Example_transition() {
 	// 7
 }
 
+// This example demonstrates how to await a state until a condition is met.
+func ExampleState_Await() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var myState async.State[int]
+
+	myExecutor.Spawn(myState.Await(
+		func(v int) bool { return v >= 3 },
+	).Then(async.Do(func() {
+		fmt.Println(myState.Get()) // Prints 3.
+	})))
+
+	for i := 1; i <= 5; i++ {
+		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
+	}
+
+	fmt.Println(myState.Get()) // Prints 5.
+
+	// Output:
+	// 3
+	// 5
+}
+
 // This example demonstrates how to run a task after another.
 // To run multiple tasks in sequence, use [async.Block] instead.
 func ExampleTask_Then() {

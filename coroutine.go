@@ -54,6 +54,7 @@ type Coroutine struct {
 	weight      Weight
 	parent      *Coroutine
 	executor    *Executor
+	guard       func() bool
 	task        Task
 	deps        map[Event]struct{}
 	cleanups    []Cleanup
@@ -169,8 +170,22 @@ func (co *Coroutine) run() (yielded bool) {
 	var res Result
 
 	pc := &co.executor.pc
+	guard := co.guard
 
 	for {
+		if guard != nil {
+			var ok bool
+			if !pc.TryCatch(func() { ok = guard() }) {
+				ok = true
+				co.task = Exit()
+			}
+			if !ok {
+				return true
+			}
+			guard = nil
+			co.guard = nil
+		}
+
 		co.clearDeps()
 		co.clearCleanups()
 
@@ -212,6 +227,12 @@ func (co *Coroutine) run() (yielded bool) {
 
 		if res.task != nil {
 			co.task = res.task
+		}
+
+		if res.guard != nil {
+			guard = res.guard
+			co.guard = guard
+			continue // For calling guard immediately.
 		}
 
 		if res.action != doTransition {
@@ -307,9 +328,11 @@ func (co *Coroutine) removeFromParent() {
 type childCoroutineCleanup Coroutine
 
 func (child *childCoroutineCleanup) Cleanup() {
-	child.task = Exit()
-	child.flag &^= flagManaged
-	if yielded := (*Coroutine)(child).run(); yielded {
+	co := (*Coroutine)(child)
+	co.flag &^= flagManaged
+	co.guard = nil
+	co.task = Exit()
+	if yielded := co.run(); yielded {
 		panic("async: child coroutine did not end (internal error)")
 	}
 }
@@ -437,8 +460,9 @@ func (co *Coroutine) Spawn(t Task) {
 // one should just return a Result right after it is created.
 type Result struct {
 	action     action
-	task       Task       // used by: doYield, doTransition, doTailTransition
-	controller controller // used by: doTransition
+	guard      func() bool // used by doYield only
+	task       Task        // used by doYield, doTransition and doTailTransition
+	controller controller  // used by doTransition only
 }
 
 // PendingResult is the return type of the [Coroutine.Await] method.
@@ -483,6 +507,13 @@ func (pr PendingResult) Continue() Result {
 // when resumed, return from a [Func].
 func (pr PendingResult) Return() Result {
 	return pr.Then(Return())
+}
+
+// Until transforms pr into one with a condition.
+// Affected coroutines remain yielded until the condition is met.
+func (pr PendingResult) Until(f func() bool) PendingResult {
+	pr.res.guard = f
+	return pr
 }
 
 // Await returns a [PendingResult] that can be transformed into a [Result]

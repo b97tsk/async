@@ -40,3 +40,11 @@ func (s *State[T]) Set(v T) {
 func (s *State[T]) Update(f func(v T) T) {
 	s.Set(f(s.value))
 }
+
+// Await returns a [Task] that awaits until the value of s meets a specified
+// condition, and then ends.
+func (s *State[T]) Await(f func(v T) bool) Task {
+	return func(co *Coroutine) Result {
+		return co.Await(s).Until(func() bool { return f(s.value) }).End()
+	}
+}
