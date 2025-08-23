@@ -38,7 +38,7 @@ func (wg *WaitGroup) Done() {
 func (wg *WaitGroup) Await() Task {
 	return func(co *Coroutine) Result {
 		if wg.n != 0 {
-			return co.Await(wg)
+			return co.Yield(wg)
 		}
 		return co.End()
 	}

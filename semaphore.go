@@ -33,13 +33,13 @@ func (s *Semaphore) Acquire(n int64) Task {
 	return func(co *Coroutine) Result {
 		if s.size-s.cur < n {
 			if n > s.size {
-				return co.Await() // Impossible to success.
+				return co.Yield() // Impossible to success.
 			}
 			w := waiterPool.Get().(*waiter)
 			w.co, w.s, w.n = co, s, n
 			s.waiters = append(s.waiters, w)
 			co.Cleanup(w)
-			return co.Yield(End())
+			return co.Await().End()
 		}
 		s.cur += n
 		return co.End()

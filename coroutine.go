@@ -398,7 +398,7 @@ func (co *Coroutine) Defer(t Task) {
 
 // Spawn creates a child coroutine with the same weight as co to work on t.
 //
-// Child coroutines, if not yet ended, are forcely exited when the parent one
+// Child coroutines, if not yet ended, are forcedly exited when the parent one
 // resumes or ends, or when the parent one is making a transition to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
@@ -420,17 +420,17 @@ func (co *Coroutine) Spawn(t Task) {
 // A Result determines what next for a coroutine to do after running a task.
 //
 // A Result can be created by calling one of the following methods:
-//   - [Coroutine.End]: for ending a coroutine or making a transition to work
-//     on another task if there are advanced control structures taking control;
-//   - [Coroutine.Await]: for yielding a coroutine with additional events to
-//     watch;
-//   - [Coroutine.Yield]: for yielding a coroutine with another task to which
-//     will be transitioned later when resuming;
+//   - [Coroutine.Await]: for creating a [PendingResult] that can be transformed
+//     into a [Result] with one of its methods, which will then cause
+//     the running coroutine to yield;
+//   - [Coroutine.Yield]: for yielding a coroutine with additional events to
+//     watch and, when resumed, reiterating the running task;
 //   - [Coroutine.Transition]: for making a transition to work on another task;
-//   - [Coroutine.Break]: for breaking a loop;
-//   - [Coroutine.Continue]: for continuing a loop;
+//   - [Coroutine.End]: for ending the running task of a coroutine;
+//   - [Coroutine.Break]: for breaking a [Loop] (or [LoopN]);
+//   - [Coroutine.Continue]: for continuing a [Loop] (or [LoopN]);
 //   - [Coroutine.Return]: for returning from a [Func];
-//   - [Coroutine.Exit]: for exiting a coroutine.
+//   - [Coroutine.Exit]: for ending a coroutine forcedly.
 //
 // These methods may have side effects. One should never store a Result in
 // a variable and overwrite it with another, before returning it. Instead,
@@ -441,38 +441,74 @@ type Result struct {
 	controller controller // used by: doTransition
 }
 
-// End returns a [Result] that will cause co to end, or make a transition to
-// work on another [Task] if there are advanced control structures taking
-// control.
-func (co *Coroutine) End() Result {
-	return Result{action: doEnd}
+// PendingResult is the return type of the [Coroutine.Await] method.
+// A PendingResult is an intermediate value that must be transformed into
+// a [Result] with one of its methods before returning from a [Task].
+type PendingResult struct {
+	res Result
 }
 
-// Await returns a [Result] that will cause co to yield.
+// Reiterate returns a [Result] that will cause the running coroutine to yield
+// and, when resumed, reiterate the running task.
+func (pr PendingResult) Reiterate() Result {
+	return pr.res
+}
+
+// Then returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, make a transition to work on another task.
+func (pr PendingResult) Then(t Task) Result {
+	pr.res.task = must(t)
+	return pr.res
+}
+
+// End returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, end the running task.
+func (pr PendingResult) End() Result {
+	return pr.Then(End())
+}
+
+// Break returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, break a [Loop] (or [LoopN]).
+func (pr PendingResult) Break() Result {
+	return pr.Then(Break())
+}
+
+// Continue returns a [Result] that will cause the running coroutine to yield
+// and, when resumed, continue a [Loop] (or [LoopN]).
+func (pr PendingResult) Continue() Result {
+	return pr.Then(Continue())
+}
+
+// Return returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, return from a [Func].
+func (pr PendingResult) Return() Result {
+	return pr.Then(Return())
+}
+
+// Await returns a [PendingResult] that can be transformed into a [Result]
+// with one of its methods, which will then cause co to yield.
 // Await also accepts additional events to watch.
 //
 // Yielding is not allowed when a coroutine is exiting.
 // If co is exiting, Await panics.
-func (co *Coroutine) Await(ev ...Event) Result {
+func (co *Coroutine) Await(ev ...Event) PendingResult {
 	if co.Exiting() {
 		panic("async: yielding while exiting")
 	}
 	if len(ev) != 0 {
 		co.Watch(ev...)
 	}
-	return Result{action: doYield}
+	return PendingResult{res: Result{action: doYield}}
 }
 
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
-// make a transition to work on t instead.
+// reiterate the running task.
+// Yield also accepts additional events to watch.
 //
 // Yielding is not allowed when a coroutine is exiting.
 // If co is exiting, Yield panics.
-func (co *Coroutine) Yield(t Task) Result {
-	if co.Exiting() {
-		panic("async: yielding while exiting")
-	}
-	return Result{action: doYield, task: must(t)}
+func (co *Coroutine) Yield(ev ...Event) Result {
+	return co.Await(ev...).Reiterate()
 }
 
 // Transition returns a [Result] that will cause co to make a transition to
@@ -481,12 +517,18 @@ func (co *Coroutine) Transition(t Task) Result {
 	return Result{action: doTransition, task: must(t)}
 }
 
-// Break returns a [Result] that will cause co to break a loop.
+// End returns a [Result] that will cause co to end its current running task.
+func (co *Coroutine) End() Result {
+	return Result{action: doEnd}
+}
+
+// Break returns a [Result] that will cause co to break a [Loop] (or [LoopN]).
 func (co *Coroutine) Break() Result {
 	return Result{action: doBreak}
 }
 
-// Continue returns a [Result] that will cause co to continue a loop.
+// Continue returns a [Result] that will cause co to continue a [Loop]
+// (or [LoopN]).
 func (co *Coroutine) Continue() Result {
 	return Result{action: doContinue}
 }
@@ -557,10 +599,7 @@ func End() Task {
 // If ev is empty, Await returns a [Task] that never ends.
 func Await(ev ...Event) Task {
 	return func(co *Coroutine) Result {
-		if len(ev) != 0 {
-			co.Watch(ev...)
-		}
-		return co.Yield(End())
+		return co.Await(ev...).End()
 	}
 }
 
@@ -601,12 +640,12 @@ func (c *blockController) negotiate(co *Coroutine, res Result) Result {
 	return Result{action: action, task: must(t)}
 }
 
-// Break returns a [Task] that breaks a loop.
+// Break returns a [Task] that breaks a [Loop] (or [LoopN]).
 func Break() Task {
 	return (*Coroutine).Break
 }
 
-// Continue returns a [Task] that continues a loop.
+// Continue returns a [Task] that continues a [Loop] (or [LoopN]).
 func Continue() Task {
 	return (*Coroutine).Continue
 }
@@ -790,13 +829,13 @@ func Join(s ...Task) Task {
 				return co.Transition(t)
 			})
 		}
-		return co.Yield(End())
+		return co.Await().End()
 	}
 }
 
 // Select returns a [Task] that runs each of the given tasks in a child
 // coroutine and awaits until any of them completes, and then ends.
-// When Select ends, tasks other than the one that completes are forcely
+// When Select ends, tasks other than the one that completes are forcedly
 // exited.
 func Select(s ...Task) Task {
 	z := slices.Clone(s)
@@ -813,7 +852,7 @@ func Select(s ...Task) Task {
 				break
 			}
 		}
-		return co.Yield(End())
+		return co.Await().End()
 	}
 }
 
@@ -822,12 +861,12 @@ func Select(s ...Task) Task {
 //
 // Enclose(t) is equivalent to Join(t) or Select(t), but cheaper and clearer.
 func Enclose(t Task) Task {
-	u := func(co *Coroutine) Result {
+	f := func(co *Coroutine) Result {
 		co.Defer(resumeParent)
 		return co.Transition(t)
 	}
 	return func(co *Coroutine) Result {
-		co.Spawn(u)
-		return co.Yield(End())
+		co.Spawn(f)
+		return co.Await().End()
 	}
 }

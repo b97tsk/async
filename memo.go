@@ -51,7 +51,7 @@ func (m *Memo[T]) init(e *Executor, w Weight, f func(co *Coroutine, s *State[T])
 			m.stale = false
 		}
 		f(co, &m.state)
-		return co.Await()
+		return co.Yield()
 	}).withWeight(w)
 	return m
 }

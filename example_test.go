@@ -39,16 +39,16 @@ func Example() {
 			// The following creates a child coroutine, it runs immediately and re-runs whenever s1 or s2 changes.
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", s1.Get()+s2.Get())
-				return co.Await(s1, s2) // Watches s1 and s2, and awaits.
+				return co.Yield(s1, s2) // Yields and awaits s1 and s2.
 			})
 		case '*':
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", s1.Get()*s2.Get())
-				return co.Await(s1, s2)
+				return co.Yield(s1, s2)
 			})
 		}
 
-		return co.Await() // Awaits anything that has been watched (in this case, op).
+		return co.Yield() // Yields and awaits anything that has been watched (in this case, op).
 	})
 
 	fmt.Println("--- SEPARATOR ---")
@@ -130,16 +130,16 @@ func Example_memo() {
 		case '+':
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
-				return co.Await(sum)
+				return co.Yield(sum)
 			})
 		case '*':
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
-				return co.Await(product)
+				return co.Yield(product)
 			})
 		}
 
-		return co.Await()
+		return co.Yield()
 	})
 
 	fmt.Println("--- SEPARATOR ---")
@@ -230,16 +230,16 @@ func Example_nonBlocking() {
 		case '+':
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 + s2 =", sum.Get())
-				return co.Await(sum)
+				return co.Yield(sum)
 			})
 		case '*':
 			co.Spawn(func(co *async.Coroutine) async.Result {
 				fmt.Println("s1 * s2 =", product.Get())
-				return co.Await(product)
+				return co.Yield(product)
 			})
 		}
 
-		return co.Await()
+		return co.Yield()
 	})
 
 	wg.Wait() // Wait for autorun to complete.
@@ -309,7 +309,7 @@ func Example_conditional() {
 		}
 
 		fmt.Println(v)
-		return co.Await()
+		return co.Yield()
 	})
 
 	inc := func(i int) int { return i + 1 }
@@ -352,7 +352,7 @@ func Example_conditionalMemo() {
 	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		co.Watch(m)
 		fmt.Println(m.Get())
-		return co.Await()
+		return co.Yield()
 	})
 
 	inc := func(i int) int { return i + 1 }
@@ -387,7 +387,7 @@ func Example_end() {
 		fmt.Println(v)
 
 		if v < 3 {
-			return co.Await()
+			return co.Yield()
 		}
 
 		return co.End()
@@ -407,42 +407,6 @@ func Example_end() {
 	// 5
 }
 
-// This example demonstrates how to add a function call before a task re-runs,
-// or after a task ends.
-func Example_cleanupFunc() {
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(myExecutor.Run)
-
-	var myState async.State[int]
-
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		co.Watch(&myState)
-
-		v := myState.Get()
-		co.CleanupFunc(func() { fmt.Println(v, myState.Get()) })
-
-		if v < 3 {
-			return co.Await()
-		}
-
-		return co.End()
-	})
-
-	for i := 1; i <= 5; i++ {
-		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
-	}
-
-	fmt.Println(myState.Get()) // Prints 5.
-
-	// Output:
-	// 0 1
-	// 1 2
-	// 2 3
-	// 3 3
-	// 5
-}
-
 // This example demonstrates how a coroutine can transition from one task to
 // another.
 func Example_transition() {
@@ -459,7 +423,7 @@ func Example_transition() {
 		fmt.Println(v)
 
 		if v < 3 {
-			return co.Await()
+			return co.Yield()
 		}
 
 		return co.Transition(func(co *async.Coroutine) async.Result {
@@ -469,7 +433,7 @@ func Example_transition() {
 			fmt.Println(v, "(transitioned)")
 
 			if v < 5 {
-				return co.Await()
+				return co.Yield()
 			}
 
 			return co.End()
@@ -509,7 +473,7 @@ func ExampleTask_Then() {
 		fmt.Println(v, "(a)")
 
 		if v < 3 {
-			return co.Await()
+			return co.Yield()
 		}
 
 		return co.Transition(func(co *async.Coroutine) async.Result {
@@ -519,7 +483,7 @@ func ExampleTask_Then() {
 			fmt.Println(v, "(transitioned)")
 
 			if v < 5 {
-				return co.Await()
+				return co.Yield()
 			}
 
 			return co.End()
@@ -533,7 +497,7 @@ func ExampleTask_Then() {
 		fmt.Println(v, "(b)")
 
 		if v < 7 {
-			return co.Await()
+			return co.Yield()
 		}
 
 		return co.End()
@@ -559,66 +523,6 @@ func ExampleTask_Then() {
 	// 6 (b)
 	// 7 (b)
 	// 9
-}
-
-// This example computes two values in separate goroutines sequentially, then
-// prints their sum.
-func ExampleAwait() {
-	var wg sync.WaitGroup // For keeping track of goroutines.
-
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
-
-	var myState struct {
-		async.Signal
-		v1, v2 int
-	}
-
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
-			ans := 15
-			myExecutor.Spawn(async.Do(func() {
-				myState.v1 = ans
-				myState.Notify()
-			}))
-		}()
-
-		return co.Transition(async.Await(&myState).Then(
-			func(co *async.Coroutine) async.Result {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
-					ans := 27
-					myExecutor.Spawn(async.Do(func() {
-						myState.v2 = ans
-						myState.Notify()
-					}))
-				}()
-
-				return co.Transition(async.Await(&myState).Then(
-					async.Do(func() {
-						fmt.Println("v1 + v2 =", myState.v1+myState.v2)
-					}),
-				))
-			},
-		))
-	})
-
-	wg.Wait()
-
-	// Output:
-	// v1 + v2 = 42
 }
 
 // This example demonstrates how to run a block of tasks.
@@ -1041,7 +945,7 @@ func ExampleJoin() {
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
-				return co.Transition(async.Await(&s1))
+				return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 			},
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1051,7 +955,7 @@ func ExampleJoin() {
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
-				return co.Transition(async.Await(&s2))
+				return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 			},
 		),
 		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
@@ -1088,7 +992,7 @@ func ExampleSelect() {
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 				}()
-				return co.Transition(async.Await(&s1))
+				return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 			},
 			func(co *async.Coroutine) async.Result {
 				wg.Add(1)
@@ -1098,7 +1002,7 @@ func ExampleSelect() {
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 				}()
-				return co.Transition(async.Await(&s2))
+				return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 			},
 		),
 		async.Do(func() { fmt.Println("s1 + s2 =", s1.Get()+s2.Get()) }),
@@ -1146,7 +1050,7 @@ func ExampleSelect_withCancel() {
 							ans := 15
 							myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
 						}()
-						return co.Transition(async.Await(&s1))
+						return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 					},
 					func(co *async.Coroutine) async.Result {
 						wg.Add(1)
@@ -1160,7 +1064,7 @@ func ExampleSelect_withCancel() {
 							ans := 27
 							myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
 						}()
-						return co.Transition(async.Await(&s2))
+						return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 					},
 				))
 			},

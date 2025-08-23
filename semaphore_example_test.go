@@ -81,8 +81,7 @@ func ExampleSemaphore_cancel() {
 			myExecutor.Spawn(async.Do(func() { sig.Notify() }))
 		}()
 
-		co.Watch(&sig)
-		return co.Yield(async.End())
+		return co.Await(&sig).End() // End this task when &sig notifies.
 	})
 
 	wg.Wait()
