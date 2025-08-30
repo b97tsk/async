@@ -1119,3 +1119,115 @@ func ExampleEnclose() {
 	// Output:
 	// after Enclose
 }
+
+func ExampleConcatSeq() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	sleep := func(d time.Duration) async.Task {
+		return func(co *async.Coroutine) async.Result {
+			var sig async.Signal
+			wg.Add(1) // Keep track of timers too.
+			tm := time.AfterFunc(d, func() {
+				defer wg.Done()
+				myExecutor.Spawn(async.Do(sig.Notify))
+			})
+			co.CleanupFunc(func() {
+				if tm.Stop() {
+					wg.Done()
+				}
+			})
+			return co.Await(&sig).End() // Awaits until &sig notifies, then ends.
+		}
+	}
+
+	myExecutor.Spawn(async.Select(
+		sleep(1200*time.Millisecond), // Cancel the following task after a period of time.
+		async.ConcatSeq(func(yield func(async.Task) bool) {
+			defer fmt.Println("done")
+			for i := 1; ; i++ {
+				d := time.Duration(i*100) * time.Millisecond
+				f := func() { fmt.Println(i) }
+				t := sleep(d).Then(async.Do(f))
+				if !yield(t) {
+					return
+				}
+			}
+		}),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// 1
+	// 2
+	// 3
+	// 4
+	// done
+}
+
+func ExampleMergeSeq() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			myExecutor.Run()
+		}()
+	})
+
+	sleep := func(d time.Duration) async.Task {
+		return func(co *async.Coroutine) async.Result {
+			var sig async.Signal
+			wg.Add(1) // Keep track of timers too.
+			tm := time.AfterFunc(d, func() {
+				defer wg.Done()
+				myExecutor.Spawn(async.Do(sig.Notify))
+			})
+			co.CleanupFunc(func() {
+				if tm.Stop() {
+					wg.Done()
+				}
+			})
+			return co.Await(&sig).End() // Awaits until &sig notifies, then ends.
+		}
+	}
+
+	myExecutor.Spawn(async.Select(
+		sleep(1000*time.Millisecond), // Cancel the following task after a period of time.
+		async.MergeSeq(3, func(yield func(async.Task) bool) {
+			defer fmt.Println("done")
+			for i := 1; ; i++ {
+				d := time.Duration(i*100) * time.Millisecond
+				f := func() { fmt.Println(i) }
+				t := sleep(d).Then(async.Do(f))
+				if !yield(t) {
+					return
+				}
+			}
+		}),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// 1
+	// 2
+	// 3
+	// 4
+	// 5
+	// 6
+	// done
+}

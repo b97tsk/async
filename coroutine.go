@@ -843,8 +843,8 @@ func resumeParent(co *Coroutine) Result {
 	return co.End()
 }
 
-// Join returns a [Task] that runs each of the given tasks in a child
-// coroutine and awaits until all of them complete, and then ends.
+// Join returns a [Task] that runs each of the given tasks in its own
+// child coroutine and awaits until all of them complete, and then ends.
 func Join(s ...Task) Task {
 	return func(co *Coroutine) Result {
 		n := len(s)
@@ -864,8 +864,8 @@ func Join(s ...Task) Task {
 	}
 }
 
-// Select returns a [Task] that runs each of the given tasks in a child
-// coroutine and awaits until any of them completes, and then ends.
+// Select returns a [Task] that runs each of the given tasks in its own
+// child coroutine and awaits until any of them completes, and then ends.
 // When Select ends, tasks other than the one that completes are forcedly
 // exited.
 func Select(s ...Task) Task {
@@ -899,5 +899,59 @@ func Enclose(t Task) Task {
 	return func(co *Coroutine) Result {
 		co.Spawn(f)
 		return co.Await().End()
+	}
+}
+
+// ConcatSeq returns a [Task] that runs each of the tasks from seq in its own
+// child coroutine sequentially until all of them complete, and then ends.
+func ConcatSeq(seq iter.Seq[Task]) Task {
+	return func(co *Coroutine) Result {
+		next, stop := iter.Pull(seq)
+		co.CleanupFunc(stop)
+		return co.Await().Until(func() bool {
+			t, ok := next()
+			if ok {
+				co.Spawn(func(co *Coroutine) Result {
+					co.Defer(resumeParent)
+					return co.Transition(t)
+				})
+			}
+			return !ok
+		}).End()
+	}
+}
+
+// MergeSeq returns a [Task] that runs each of the tasks from seq in its own
+// child coroutine concurrently until all of them complete, and then ends.
+// The argument concurrency specifies the maximum number of tasks that can
+// coexist at the same time. If it is zero, no tasks will be run and MergeSeq
+// never ends. It may wrap around. The maximum value of concurrency is -1.
+func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
+	return func(co *Coroutine) Result {
+		next, stop := iter.Pull(seq)
+		co.CleanupFunc(stop)
+		var tasks struct {
+			n int
+		}
+		done := func(co *Coroutine) Result {
+			tasks.n--
+			return resumeParent(co)
+		}
+		return co.Await().Until(func() bool {
+			for {
+				if tasks.n == concurrency {
+					return false
+				}
+				t, ok := next()
+				if !ok {
+					return tasks.n == 0
+				}
+				tasks.n++
+				co.Spawn(func(co *Coroutine) Result {
+					co.Defer(done)
+					return co.Transition(t)
+				})
+			}
+		}).End()
 	}
 }
