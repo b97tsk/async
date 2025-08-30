@@ -134,6 +134,8 @@ func (co *Coroutine) Resume() {
 func (e *Executor) resumeCoroutine(co *Coroutine) {
 	switch flag := co.flag; {
 	case flag&flagEnded != 0:
+		// Child coroutines may try to resume their parent ones.
+		// No panicking here.
 	case flag&flagEnqueued != 0:
 		co.flag = flag | flagResumed
 	default:
@@ -354,7 +356,7 @@ func (co *Coroutine) Resumed() bool {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	if co.Exiting() {
+	if co.flag&(flagEnded|flagExiting) != 0 {
 		return
 	}
 	for _, d := range ev {
@@ -385,6 +387,9 @@ func (f CleanupFunc) Cleanup() { f() }
 // Cleanup adds something to clean up when co resumes or ends, or when co is
 // making a transition to work on another [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
+	if co.flag&flagEnded != 0 {
+		panic("async: coroutine has already ended")
+	}
 	if c == nil {
 		return
 	}
@@ -394,15 +399,21 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 // CleanupFunc adds a function call when co resumes or ends, or when co is
 // making a transition to work on another [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
+	if co.flag&flagEnded != 0 {
+		panic("async: coroutine has already ended")
+	}
 	if f == nil {
 		return
 	}
-	co.Cleanup(CleanupFunc(f))
+	co.cleanups = append(co.cleanups, CleanupFunc(f))
 }
 
 // Defer adds a [Task] for execution when returning from a [Func].
 // Deferred tasks are executed in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
+	if co.flag&flagEnded != 0 {
+		panic("async: coroutine has already ended")
+	}
 	if t == nil {
 		return
 	}
@@ -415,6 +426,10 @@ func (co *Coroutine) Defer(t Task) {
 // resumes or ends, or when the parent one is making a transition to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
+	if co.flag&flagEnded != 0 {
+		panic("async: coroutine has already ended")
+	}
+
 	level := co.level + 1
 	if level == 0 {
 		panic("async: too many levels")
