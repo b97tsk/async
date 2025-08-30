@@ -132,38 +132,28 @@ func (co *Coroutine) Resume() {
 }
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
-	flag := co.flag
-	if flag&flagEnded != 0 {
-		return
-	}
-
-	if flag&flagEnqueued != 0 {
+	switch flag := co.flag; {
+	case flag&flagEnded != 0:
+	case flag&flagEnqueued != 0:
 		co.flag = flag | flagResumed
-		return
+	default:
+		co.flag = flag | flagResumed | flagEnqueued
+		e.pq.Push(co)
 	}
-
-	co.flag = flag | flagResumed | flagEnqueued
-
-	e.pq.Push(co)
 }
 
 func (e *Executor) runCoroutine(co *Coroutine) {
 	flag := co.flag
 	flag &^= flagEnqueued
 	co.flag = flag
-
-	if flag&flagEnded != 0 {
+	switch {
+	case flag&flagEnded != 0:
 		e.freeCoroutine(co)
-		return
+	case flag&flagResumed != 0:
+		e.mu.Unlock()
+		co.run()
+		e.mu.Lock()
 	}
-
-	if flag&flagResumed == 0 {
-		return
-	}
-
-	e.mu.Unlock()
-	co.run()
-	e.mu.Lock()
 }
 
 func (co *Coroutine) run() (yielded bool) {
@@ -175,7 +165,7 @@ func (co *Coroutine) run() (yielded bool) {
 	for {
 		if guard != nil {
 			var ok bool
-			if !pc.TryCatch(func() { ok = guard() }) {
+			if !pc.Try(func() { ok = guard() }) {
 				ok = true
 				co.task = Exit()
 			}
@@ -191,7 +181,7 @@ func (co *Coroutine) run() (yielded bool) {
 
 		co.flag &^= flagResumed | flagEnded
 
-		if !pc.TryCatch(func() { res = co.task(co) }) {
+		if !pc.Try(func() { res = co.task(co) }) {
 			res = co.Exit()
 		}
 
@@ -200,12 +190,12 @@ func (co *Coroutine) run() (yielded bool) {
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
 				c := controllers[i]
-				if !pc.TryCatch(func() { res = c.negotiate(co, res) }) {
+				if !pc.Try(func() { res = c.negotiate(co, res) }) {
 					res = c.negotiate(co, co.Exit())
 				}
 				if res.action != doTransition {
-					if c, ok := c.(Cleanup); ok {
-						pc.TryCatch(c.Cleanup)
+					if c, ok := c.(interface{ cleanup() }); ok {
+						pc.Try(c.cleanup)
 					}
 					controllers[i] = nil
 					controllers = controllers[:i]
@@ -216,7 +206,7 @@ func (co *Coroutine) run() (yielded bool) {
 				}
 			}
 			if res.action != doTransition && res.action != doTailTransition {
-				if !pc.TryCatch(func() { res = rootController.negotiate(co, res) }) {
+				if !pc.Try(func() { res = rootController.negotiate(co, res) }) {
 					res = rootController.negotiate(co, co.Exit())
 				}
 			}
@@ -305,7 +295,7 @@ func (co *Coroutine) clearCleanups() {
 		cleanups := co.cleanups
 		co.cleanups = nil
 		for _, c := range slices.Backward(cleanups) {
-			pc.TryCatch(c.Cleanup)
+			pc.Try(c.Cleanup)
 		}
 	}
 	clear(cleanups)
@@ -834,7 +824,7 @@ func (c *seqController) negotiate(co *Coroutine, res Result) Result {
 	return res
 }
 
-func (c *seqController) Cleanup() {
+func (c *seqController) cleanup() {
 	c.stop()
 }
 

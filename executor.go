@@ -83,7 +83,7 @@ func (e *Executor) Run() {
 	e.running = false
 	e.mu.Unlock()
 
-	pc.Rethrow()
+	pc.Repanic()
 }
 
 // Spawn creates a coroutine with default weight to work on t.

@@ -15,13 +15,13 @@ func (pc *paniccatcher) Reset() {
 	pc.items = nil
 }
 
-func (pc *paniccatcher) Rethrow() {
+func (pc *paniccatcher) Repanic() {
 	if len(pc.items) != 0 {
 		panic(&panicvalue{items: pc.items})
 	}
 }
 
-func (pc *paniccatcher) TryCatch(f func()) (ok bool) {
+func (pc *paniccatcher) Try(f func()) (ok bool) {
 	defer func() {
 		if !ok {
 			v := recover()
