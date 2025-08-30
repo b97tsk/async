@@ -3,13 +3,13 @@ package async
 // A Memo is a State-like structure that carries a value that can only be set
 // in a given function driven by an internal coroutine.
 //
-// A memo is designed to have a value that is computed from other states.
-// What make a memo useful are that:
-//   - A memo can prevent unnecessary computations when it isn't used;
-//   - A memo can prevent unnecessary propagations when its value isn't
+// A Memo is designed to have a value that is computed from other states.
+// What make a Memo useful are that:
+//   - A Memo can prevent unnecessary computations when it isn't used;
+//   - A Memo can prevent unnecessary propagations when its value isn't
 //     changed.
 //
-// To create a memo, use [NewMemo].
+// To create a Memo, use [NewMemo].
 //
 // A Memo must not be shared by more than one [Executor].
 type Memo[T any] struct {
@@ -24,13 +24,13 @@ type Memo[T any] struct {
 // One must pass a function that watches some states, computes a value from
 // these states, and then updates the given state if the values differ.
 //
-// Like any [Event], a memo can be watched by multiple coroutines.
+// Like any [Event], a [Memo] can be watched by multiple coroutines.
 // The watch list increases and decreases over time.
 // When the last coroutine in the list unwatches the memo, the memo does not
 // immediately end its internal coroutine.
 // Ending the internal coroutine would only put the memo into a stale state
 // because the memo no longer detects dependency changes.
-// By not immediately ending the internal coroutine, a memo prevents
+// By not immediately ending the internal coroutine, a [Memo] prevents
 // an extra computation when a new coroutine watches it, provided that
 // there are no dependency changes.
 func NewMemo[T any](e *Executor, w Weight, f func(co *Coroutine, s *State[T])) *Memo[T] {

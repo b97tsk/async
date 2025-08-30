@@ -27,7 +27,7 @@ import (
 // One would instead use the Autorun method to set up an autorun function to
 // calling the Run method automatically whenever a coroutine is spawned or
 // resumed.
-// An executor never calls the autorun function twice at the same time.
+// An Executor never calls the autorun function twice at the same time.
 type Executor struct {
 	mu      sync.Mutex
 	pq      priorityqueue[*Coroutine]
