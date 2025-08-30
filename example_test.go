@@ -1103,7 +1103,7 @@ func ExampleSelect_withCancel() {
 	// s1 + s2 = 15
 }
 
-func ExampleEnclose() {
+func ExampleSpawn() {
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
@@ -1112,12 +1112,12 @@ func ExampleEnclose() {
 	// Tasks after Exit do not run.
 	myExecutor.Spawn(async.Exit().Then(async.Do(func() { fmt.Println("after Exit") })))
 
-	// With the help of async.Enclose, Exit only affects child coroutines.
-	// The parent one continues to run tasks after async.Enclose.
-	myExecutor.Spawn(async.Enclose(async.Exit()).Then(async.Do(func() { fmt.Println("after Enclose") })))
+	// With the help of async.Spawn, Exit only affects child coroutines.
+	// The parent one continues to run tasks after async.Spawn.
+	myExecutor.Spawn(async.Spawn(async.Exit()).Then(async.Do(func() { fmt.Println("after Spawn") })))
 
 	// Output:
-	// after Enclose
+	// after Spawn
 }
 
 func ExampleConcatSeq() {

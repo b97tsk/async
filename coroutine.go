@@ -887,11 +887,11 @@ func Select(s ...Task) Task {
 	}
 }
 
-// Enclose returns a [Task] that runs t in a child coroutine and awaits until
+// Spawn returns a [Task] that runs t in a child coroutine and awaits until
 // t completes, and then ends.
 //
-// Enclose(t) is equivalent to Join(t) or Select(t), but cheaper and clearer.
-func Enclose(t Task) Task {
+// Spawn(t) is equivalent to Join(t) or Select(t), but cheaper and clearer.
+func Spawn(t Task) Task {
 	f := func(co *Coroutine) Result {
 		co.Defer(resumeParent)
 		return co.Transition(t)
