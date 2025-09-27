@@ -88,5 +88,5 @@ func (q *priorityqueue[E]) Pop() (v E) {
 		q.head, q.tail = q.tail, q.tail[:0]
 	}
 
-	return
+	return v
 }
