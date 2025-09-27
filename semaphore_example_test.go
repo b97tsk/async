@@ -72,16 +72,18 @@ func ExampleSemaphore_cancel() {
 			})))
 		}
 
-		var sig async.Signal
-
+		co.Escape()
 		wg.Add(1)
-		go func() {
+		go func(outer *async.Coroutine) {
 			defer wg.Done()
 			time.Sleep(100 * time.Millisecond)
-			myExecutor.Spawn(async.Do(func() { sig.Notify() }))
-		}()
+			myExecutor.Spawn(async.Do(func() {
+				outer.Unescape()
+				outer.Resume()
+			}))
+		}(co)
 
-		return co.Await(&sig).End() // End this task when &sig notifies.
+		return co.Await().End()
 	})
 
 	wg.Wait()

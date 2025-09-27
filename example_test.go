@@ -1135,18 +1135,22 @@ func ExampleConcatSeq() {
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
+			co.Escape()
 			wg.Add(1) // Keep track of timers too.
 			tm := time.AfterFunc(d, func() {
 				defer wg.Done()
-				myExecutor.Spawn(async.Do(sig.Notify))
+				myExecutor.Spawn(async.Do(func() {
+					co.Unescape()
+					co.Resume()
+				}))
 			})
 			co.CleanupFunc(func() {
 				if tm.Stop() {
 					wg.Done()
+					co.Unescape()
 				}
 			})
-			return co.Await(&sig).End() // Awaits until &sig notifies, then ends.
+			return co.Await().End()
 		}
 	}
 
@@ -1190,18 +1194,22 @@ func ExampleMergeSeq() {
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
+			co.Escape()
 			wg.Add(1) // Keep track of timers too.
 			tm := time.AfterFunc(d, func() {
 				defer wg.Done()
-				myExecutor.Spawn(async.Do(sig.Notify))
+				myExecutor.Spawn(async.Do(func() {
+					co.Unescape()
+					co.Resume()
+				}))
 			})
 			co.CleanupFunc(func() {
 				if tm.Stop() {
 					wg.Done()
+					co.Unescape()
 				}
 			})
-			return co.Await(&sig).End() // Awaits until &sig notifies, then ends.
+			return co.Await().End()
 		}
 	}
 

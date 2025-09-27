@@ -23,10 +23,11 @@ const (
 	flagResumed = 1 << iota
 	flagEnqueued
 	flagEnded
+	flagExiting
+	flagManaged
 	flagRecyclable
 	flagRecycled
-	flagManaged
-	flagExiting
+	flagEscaped
 )
 
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
@@ -73,7 +74,7 @@ func (e *Executor) newCoroutine() *Coroutine {
 }
 
 func (e *Executor) freeCoroutine(co *Coroutine) {
-	if co.flag&(flagRecyclable|flagRecycled) == flagRecyclable {
+	if co.flag&(flagRecyclable|flagRecycled|flagEscaped) == flagRecyclable {
 		co.flag |= flagRecycled
 		co.parent = nil
 		co.executor = nil
@@ -133,9 +134,8 @@ func (co *Coroutine) Resume() {
 
 func (e *Executor) resumeCoroutine(co *Coroutine) {
 	switch flag := co.flag; {
-	case flag&flagEnded != 0:
-		// Child coroutines may try to resume their parent ones.
-		// No panicking here.
+	case flag&flagRecycled != 0:
+		panic("async: coroutine has been recycled")
 	case flag&flagEnqueued != 0:
 		co.flag = flag | flagResumed
 	default:
@@ -359,6 +359,27 @@ func (co *Coroutine) Resumed() bool {
 	return co.flag&flagResumed != 0
 }
 
+// Escape marks co as an escaped coroutine, preventing co from being put into
+// pool for recycling.
+// Useful when one wants to access co from another goroutine.
+//
+// Without calling this method, a coroutine may be put into pool for recycling
+// when it ends or exits.
+func (co *Coroutine) Escape() {
+	co.flag |= flagEscaped
+}
+
+// Unescape undoes what [Coroutine.Escape] does so that co can be put into
+// pool again for recycling.
+//
+// Panics if Escape has not yet been called after the last call of Unescape.
+func (co *Coroutine) Unescape() {
+	if co.flag&flagEscaped == 0 {
+		panic("async: coroutine did not escape")
+	}
+	co.flag &^= flagEscaped
+}
+
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
 	if co.flag&(flagEnded|flagExiting) != 0 {
@@ -377,8 +398,8 @@ func (co *Coroutine) Watch(ev ...Event) {
 
 // Cleanup represents any type that carries a Cleanup method.
 // A Cleanup can be added to a coroutine in a [Task] function for making
-// an effect some time later when the coroutine resumes or ends, or when
-// the coroutine is making a transition to work on another [Task].
+// an effect some time later when the coroutine resumes or ends or exits, or
+// when the coroutine is making a transition to work on another [Task].
 type Cleanup interface {
 	Cleanup()
 }
@@ -389,8 +410,8 @@ type CleanupFunc func()
 // Cleanup implements the [Cleanup] interface.
 func (f CleanupFunc) Cleanup() { f() }
 
-// Cleanup adds something to clean up when co resumes or ends, or when co is
-// making a transition to work on another [Task].
+// Cleanup adds something to clean up when co resumes or ends or exits, or when
+// co is making a transition to work on another [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
 	if co.Ended() {
 		panic("async: coroutine has already ended")
@@ -401,8 +422,8 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 	co.cleanups = append(co.cleanups, c)
 }
 
-// CleanupFunc adds a function call when co resumes or ends, or when co is
-// making a transition to work on another [Task].
+// CleanupFunc adds a function call when co resumes or ends or exits, or when
+// co is making a transition to work on another [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
 	if co.Ended() {
 		panic("async: coroutine has already ended")
@@ -428,8 +449,8 @@ func (co *Coroutine) Defer(t Task) {
 // Spawn creates a child coroutine with the same weight as co to work on t.
 //
 // Child coroutines, if not yet ended, are forcedly exited when the parent one
-// resumes or ends, or when the parent one is making a transition to work on
-// another task.
+// resumes or ends or exits, or when the parent one is making a transition to
+// work on another [Task].
 func (co *Coroutine) Spawn(t Task) {
 	if co.Ended() {
 		panic("async: coroutine has already ended")
@@ -489,7 +510,7 @@ func (pr PendingResult) Reiterate() Result {
 }
 
 // Then returns a [Result] that will cause the running coroutine to yield and,
-// when resumed, make a transition to work on another task.
+// when resumed, make a transition to work on another [Task].
 func (pr PendingResult) Then(t Task) Result {
 	pr.res.task = must(t)
 	return pr.res
@@ -600,8 +621,8 @@ type controller interface {
 // The return value of a task, a [Result], determines what next for a coroutine
 // to do.
 //
-// The argument co must not escape, because co can be recycled by an [Executor]
-// when co ends.
+// Without calling [Coroutine.Escape], co must not escape to another goroutine
+// because, co may be put into pool for recycling when co ends or exits.
 type Task func(co *Coroutine) Result
 
 // Then returns a [Task] that first works on t, then next after t ends.
