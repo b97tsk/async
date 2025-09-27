@@ -344,6 +344,11 @@ func (co *Coroutine) Executor() *Executor {
 	return co.executor
 }
 
+// Ended reports whether co has already ended (or exited).
+func (co *Coroutine) Ended() bool {
+	return co.flag&flagEnded != 0
+}
+
 // Exiting reports whether co is exiting.
 func (co *Coroutine) Exiting() bool {
 	return co.flag&flagExiting != 0
@@ -387,7 +392,7 @@ func (f CleanupFunc) Cleanup() { f() }
 // Cleanup adds something to clean up when co resumes or ends, or when co is
 // making a transition to work on another [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
-	if co.flag&flagEnded != 0 {
+	if co.Ended() {
 		panic("async: coroutine has already ended")
 	}
 	if c == nil {
@@ -399,7 +404,7 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 // CleanupFunc adds a function call when co resumes or ends, or when co is
 // making a transition to work on another [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
-	if co.flag&flagEnded != 0 {
+	if co.Ended() {
 		panic("async: coroutine has already ended")
 	}
 	if f == nil {
@@ -411,7 +416,7 @@ func (co *Coroutine) CleanupFunc(f func()) {
 // Defer adds a [Task] for execution when returning from a [Func].
 // Deferred tasks are executed in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
-	if co.flag&flagEnded != 0 {
+	if co.Ended() {
 		panic("async: coroutine has already ended")
 	}
 	if t == nil {
@@ -426,7 +431,7 @@ func (co *Coroutine) Defer(t Task) {
 // resumes or ends, or when the parent one is making a transition to work on
 // another task.
 func (co *Coroutine) Spawn(t Task) {
-	if co.flag&flagEnded != 0 {
+	if co.Ended() {
 		panic("async: coroutine has already ended")
 	}
 
