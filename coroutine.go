@@ -514,6 +514,12 @@ func (pr PendingResult) Return() Result {
 	return pr.Then(Return())
 }
 
+// Exit returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, cause the running coroutine to exit.
+func (pr PendingResult) Exit() Result {
+	return pr.Then(Exit())
+}
+
 // Until transforms pr into one with a condition.
 // Affected coroutines remain yielded until the condition is met.
 func (pr PendingResult) Until(f func() bool) PendingResult {
