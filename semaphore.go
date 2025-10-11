@@ -69,7 +69,7 @@ func (s *Semaphore) notifyWaiters() {
 			break
 		}
 		s.cur += w.n
-		w.n = 0
+		w.acquired = true
 		w.co.Resume()
 		n++
 	}
@@ -77,17 +77,20 @@ func (s *Semaphore) notifyWaiters() {
 }
 
 type waiter struct {
-	co *Coroutine
-	s  *Semaphore
-	n  int64
+	co       *Coroutine
+	s        *Semaphore
+	n        int64
+	acquired bool
 }
 
 func (w *waiter) Cleanup() {
-	if w.n != 0 {
+	switch {
+	case !w.acquired:
 		w.s.removeWaiter(w)
+	case w.co.Exiting():
+		defer w.s.Release(w.n)
 	}
-	w.co = nil
-	w.s = nil
+	*w = waiter{}
 	waiterPool.Put(w)
 }
 
