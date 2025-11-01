@@ -666,6 +666,12 @@ func End() Task {
 // and then ends.
 // If ev is empty, Await returns a [Task] that never ends.
 func Await(ev ...Event) Task {
+	if len(ev) == 0 {
+		// Return a pure function instead.
+		return func(co *Coroutine) Result {
+			return co.Await().End()
+		}
+	}
 	return func(co *Coroutine) Result {
 		return co.Await(ev...).End()
 	}
