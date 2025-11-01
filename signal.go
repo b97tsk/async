@@ -54,6 +54,6 @@ func (s *Signal) Notify() {
 			panic("async(Signal): executor inconsistent")
 		}
 
-		e.resumeCoroutine(co)
+		e.resumeCoroutine(co, false)
 	}
 }

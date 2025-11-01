@@ -126,13 +126,10 @@ func (co *Coroutine) less(other *Coroutine) bool {
 
 // Resume resumes co.
 func (co *Coroutine) Resume() {
-	e := co.executor
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.resumeCoroutine(co)
+	co.executor.resumeCoroutine(co, true)
 }
 
-func (e *Executor) resumeCoroutine(co *Coroutine) {
+func (e *Executor) resumeCoroutine(co *Coroutine, lock bool) {
 	switch flag := co.flag; {
 	case flag&flagRecycled != 0:
 		panic("async: coroutine has been recycled")
@@ -140,7 +137,13 @@ func (e *Executor) resumeCoroutine(co *Coroutine) {
 		co.flag = flag | flagResumed
 	default:
 		co.flag = flag | flagResumed | flagEnqueued
+		if lock {
+			e.mu.Lock()
+		}
 		e.pq.Push(co)
+		if lock {
+			e.mu.Unlock()
+		}
 	}
 }
 
