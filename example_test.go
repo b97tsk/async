@@ -193,13 +193,7 @@ func Example_nonBlocking() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	s1, s2 := async.NewState(1), async.NewState(2)
 
@@ -950,36 +944,26 @@ func ExampleJoin() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	var s1, s2 async.State[int]
 
 	myExecutor.Spawn(async.Block(
 		async.Join(
 			func(co *async.Coroutine) async.Result {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
-				}()
+				})
 				return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 			},
 			func(co *async.Coroutine) async.Result {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
-				}()
+				})
 				return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 			},
 		),
@@ -997,36 +981,26 @@ func ExampleSelect() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	var s1, s2 async.State[int]
 
 	myExecutor.Spawn(async.Block(
 		async.Select(
 			func(co *async.Coroutine) async.Result {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 					ans := 15
 					myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
-				}()
+				})
 				return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 			},
 			func(co *async.Coroutine) async.Result {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					time.Sleep(1500 * time.Millisecond) // Heavy work #2 here.
 					ans := 27
 					myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
-				}()
+				})
 				return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 			},
 		),
@@ -1047,13 +1021,7 @@ func ExampleSelect_withCancel() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	var s1, s2 async.State[int]
 
@@ -1064,9 +1032,7 @@ func ExampleSelect_withCancel() {
 				co.Defer(async.Do(cancel))
 				return co.Transition(async.Select(
 					func(co *async.Coroutine) async.Result {
-						wg.Add(1)
-						go func() {
-							defer wg.Done()
+						wg.Go(func() {
 							select { // Heavy work #1 here.
 							case <-time.After(500 * time.Millisecond):
 							case <-ctx.Done():
@@ -1074,13 +1040,11 @@ func ExampleSelect_withCancel() {
 							}
 							ans := 15
 							myExecutor.Spawn(async.Do(func() { s1.Set(ans) }))
-						}()
+						})
 						return co.Await(&s1).End() // Awaits until &s1 notifies, then ends.
 					},
 					func(co *async.Coroutine) async.Result {
-						wg.Add(1)
-						go func() {
-							defer wg.Done()
+						wg.Go(func() {
 							select { // Heavy work #2 here.
 							case <-time.After(1500 * time.Millisecond):
 							case <-ctx.Done():
@@ -1088,7 +1052,7 @@ func ExampleSelect_withCancel() {
 							}
 							ans := 27
 							myExecutor.Spawn(async.Do(func() { s2.Set(ans) }))
-						}()
+						})
 						return co.Await(&s2).End() // Awaits until &s2 notifies, then ends.
 					},
 				))
@@ -1125,13 +1089,7 @@ func ExampleConcatSeq() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
@@ -1184,13 +1142,7 @@ func ExampleMergeSeq() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
