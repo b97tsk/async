@@ -194,15 +194,13 @@ func (co *Coroutine) run() (yielded bool) {
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
-				c := controllers[i]
+				c := &controllers[i]
 				if !pc.Try(func() { res = c.negotiate(co, res) }) {
 					res = c.negotiate(co, co.Exit())
 				}
 				if res.action != doTransition {
-					if c, ok := c.(interface{ cleanup() }); ok {
-						pc.Try(c.cleanup)
-					}
-					controllers[i] = nil
+					pc.Try(c.cleanup)
+					controllers[i] = controller{}
 					controllers = controllers[:i]
 					co.controllers = controllers
 				}
@@ -211,6 +209,7 @@ func (co *Coroutine) run() (yielded bool) {
 				}
 			}
 			if res.action != doTransition && res.action != doTailTransition {
+				rootController := &controller{kind: funcController}
 				if !pc.Try(func() { res = rootController.negotiate(co, res) }) {
 					res = rootController.negotiate(co, co.Exit())
 				}
@@ -234,14 +233,14 @@ func (co *Coroutine) run() (yielded bool) {
 			break
 		}
 
-		if res.controller != nil {
+		if res.controller.kind != 0 {
 			addController := true
-			if _, ok := res.controller.(funcController); ok {
-				lastController := rootController
+			if res.controller.kind == funcController {
+				lastControllerKind := funcController
 				if n := len(co.controllers); n != 0 {
-					lastController = co.controllers[n-1]
+					lastControllerKind = co.controllers[n-1].kind
 				}
-				if _, ok := lastController.(funcController); ok {
+				if lastControllerKind == funcController {
 					// Tail-call optimization:
 					// If the last controller is also a funcController, do not add another one.
 					// (doTailTransition also pays tribute to this optimization.)
@@ -271,11 +270,11 @@ func (co *Coroutine) run() (yielded bool) {
 	co.removeFromParent()
 
 	if len(co.defers) != 0 {
-		panic("async: not all deferred tasks are handled (internal error)")
+		panic("async: internal error: not all deferred tasks are handled")
 	}
 
 	if len(co.controllers) != 0 {
-		panic("async: not all controllers are handled (internal error)")
+		panic("async: internal error: not all controllers are handled")
 	}
 
 	if co.flag&flagEnqueued == 0 {
@@ -328,7 +327,7 @@ func (child *childCoroutineCleanup) Cleanup() {
 	co.guard = nil
 	co.task = Exit()
 	if yielded := co.run(); yielded {
-		panic("async: child coroutine did not end (internal error)")
+		panic("async: internal error: child coroutine did not end")
 	}
 }
 
@@ -616,8 +615,93 @@ func (co *Coroutine) Exit() Result {
 	return Result{action: doExit}
 }
 
-type controller interface {
-	negotiate(co *Coroutine, res Result) Result
+type controllerKind int
+
+const (
+	_ controllerKind = iota
+	funcController
+	thenController
+	blockController
+	loopController
+	seqController
+)
+
+type controller struct {
+	kind     controllerKind
+	numDefer int                 // used by funcController only
+	task     Task                // used by thenController and loopController
+	tasks    []Task              // used by blockController only
+	next     func() (Task, bool) // used by seqController only
+	stop     func()              // used by seqController only
+}
+
+func (c *controller) negotiate(co *Coroutine, res Result) Result {
+	switch c.kind {
+	case funcController:
+		switch res.action {
+		case doEnd, doReturn, doExit:
+			if len(co.defers) > c.numDefer {
+				i := len(co.defers) - 1
+				t := co.defers[i]
+				co.defers[i] = nil
+				co.defers = co.defers[:i]
+				return co.Transition(t)
+			}
+			if co.Exiting() {
+				return co.Exit()
+			}
+			return co.End()
+		case doBreak:
+			panic("async: unhandled break action")
+		case doContinue:
+			panic("async: unhandled continue action")
+		default:
+			panic("async: internal error: unknown action")
+		}
+	case thenController:
+		if res.action != doEnd {
+			return res
+		}
+		return Result{action: doTailTransition, task: c.task}
+	case blockController:
+		if res.action != doEnd || len(c.tasks) == 0 {
+			return res
+		}
+		t := c.tasks[0]
+		c.tasks = c.tasks[1:]
+		action := doTransition
+		if len(c.tasks) == 0 {
+			action = doTailTransition
+		}
+		return Result{action: action, task: must(t)}
+	case loopController:
+		switch res.action {
+		case doEnd:
+			return co.Transition(c.task)
+		case doBreak:
+			return co.End()
+		case doContinue:
+			return co.Transition(c.task)
+		default:
+			return res
+		}
+	case seqController:
+		if res.action == doEnd {
+			if t, ok := c.next(); ok {
+				return co.Transition(t)
+			}
+		}
+		return res
+	default:
+		panic("async: internal error: unknown controller")
+	}
+}
+
+func (c *controller) cleanup() {
+	switch c.kind {
+	case seqController:
+		c.stop()
+	}
 }
 
 // A Task is a piece of work that a coroutine is given to do when it is spawned.
@@ -636,20 +720,9 @@ func (t Task) Then(next Task) Task {
 		return Result{
 			action:     doTransition,
 			task:       must(t),
-			controller: &thenController{must(next)},
+			controller: controller{kind: thenController, task: must(next)},
 		}
 	}
-}
-
-type thenController struct {
-	next Task
-}
-
-func (c *thenController) negotiate(co *Coroutine, res Result) Result {
-	if res.action != doEnd {
-		return res
-	}
-	return Result{action: doTailTransition, task: c.next}
 }
 
 // Do returns a [Task] that calls f, and then ends.
@@ -695,26 +768,9 @@ func Block(s ...Task) Task {
 		return Result{
 			action:     doTransition,
 			task:       must(s[0]),
-			controller: &blockController{s[1:]},
+			controller: controller{kind: blockController, tasks: s[1:]},
 		}
 	}
-}
-
-type blockController struct {
-	s []Task
-}
-
-func (c *blockController) negotiate(co *Coroutine, res Result) Result {
-	if res.action != doEnd || len(c.s) == 0 {
-		return res
-	}
-	t := c.s[0]
-	c.s = c.s[1:]
-	action := doTransition
-	if len(c.s) == 0 {
-		action = doTailTransition
-	}
-	return Result{action: action, task: must(t)}
 }
 
 // Break returns a [Task] that breaks a [Loop] (or [LoopN]).
@@ -735,7 +791,7 @@ func Loop(t Task) Task {
 		return Result{
 			action:     doTransition,
 			task:       must(t),
-			controller: &loopController{t},
+			controller: controller{kind: loopController, task: t},
 		}
 	}
 }
@@ -757,7 +813,7 @@ func LoopN[Int intType](n Int, t Task) Task {
 		return Result{
 			action:     doTransition,
 			task:       f,
-			controller: &loopController{f},
+			controller: controller{kind: loopController, task: f},
 		}
 	}
 }
@@ -765,23 +821,6 @@ func LoopN[Int intType](n Int, t Task) Task {
 type intType interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
 		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
-}
-
-type loopController struct {
-	t Task
-}
-
-func (c *loopController) negotiate(co *Coroutine, res Result) Result {
-	switch res.action {
-	case doEnd:
-		return co.Transition(c.t)
-	case doBreak:
-		return co.End()
-	case doContinue:
-		return co.Transition(c.t)
-	default:
-		return res
-	}
 }
 
 // Defer returns a [Task] that adds t for execution when returning from
@@ -812,36 +851,8 @@ func Func(t Task) Task {
 		return Result{
 			action:     doTransition,
 			task:       must(t),
-			controller: funcController(len(co.defers)),
+			controller: controller{kind: funcController, numDefer: len(co.defers)},
 		}
-	}
-}
-
-// Note that funcController must be stateless, because rootController,
-// as a funcController, might be shared by multiple coroutines run by
-// different executors.
-type funcController int
-
-func (c funcController) negotiate(co *Coroutine, res Result) Result {
-	switch res.action {
-	case doEnd, doReturn, doExit:
-		if defers := co.defers; int(c) < len(defers) {
-			i := len(defers) - 1
-			t := defers[i]
-			defers[i] = nil
-			co.defers = defers[:i]
-			return co.Transition(t)
-		}
-		if co.Exiting() {
-			return co.Exit()
-		}
-		return co.End()
-	case doBreak:
-		panic("async: unhandled break action")
-	case doContinue:
-		panic("async: unhandled continue action")
-	default:
-		panic("async: unknown action (internal error)")
 	}
 }
 
@@ -852,8 +863,6 @@ func must(t Task) Task {
 	return t
 }
 
-var rootController controller = funcController(0)
-
 // FromSeq returns a [Task] that runs each of the tasks from seq in sequence.
 func FromSeq(seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
@@ -861,27 +870,9 @@ func FromSeq(seq iter.Seq[Task]) Task {
 		return Result{
 			action:     doTransition,
 			task:       End(),
-			controller: &seqController{next, stop},
+			controller: controller{kind: seqController, next: next, stop: stop},
 		}
 	}
-}
-
-type seqController struct {
-	next func() (Task, bool)
-	stop func()
-}
-
-func (c *seqController) negotiate(co *Coroutine, res Result) Result {
-	if res.action == doEnd {
-		if t, ok := c.next(); ok {
-			return co.Transition(t)
-		}
-	}
-	return res
-}
-
-func (c *seqController) cleanup() {
-	c.stop()
 }
 
 func resumeParent(co *Coroutine) Result {
