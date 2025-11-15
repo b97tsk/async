@@ -995,6 +995,10 @@ func must(t Task) Task {
 }
 
 // FromSeq returns a [Task] that runs each of the tasks from seq in sequence.
+//
+// Caveat: requires spawning a goroutine (which is stackful) when running
+// the returned task. The goroutine leaks, as well as the coroutine that runs
+// the returned task, if the returned task never ends.
 func FromSeq(seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
@@ -1013,6 +1017,8 @@ func resumeParent(co *Coroutine) Result {
 
 // Join returns a [Task] that runs each of the given tasks in its own
 // child coroutine and awaits until all of them complete, and then ends.
+//
+// When passed no arguments, Join returns a [Task] that never ends.
 func Join(s ...Task) Task {
 	return func(co *Coroutine) Result {
 		n := len(s)
@@ -1036,6 +1042,8 @@ func Join(s ...Task) Task {
 // child coroutine and awaits until any of them completes, and then ends.
 // When Select ends, tasks other than the one that completes are forcedly
 // exited.
+//
+// When passed no arguments, Select returns a [Task] that never ends.
 func Select(s ...Task) Task {
 	z := slices.Clone(s)
 	for i, t := range z {
@@ -1072,6 +1080,10 @@ func Spawn(t Task) Task {
 
 // ConcatSeq returns a [Task] that runs each of the tasks from seq in its own
 // child coroutine sequentially until all of them complete, and then ends.
+//
+// Caveat: requires spawning a goroutine (which is stackful) when running
+// the returned task. The goroutine leaks, as well as the coroutine that runs
+// the returned task, if the returned task never ends.
 func ConcatSeq(seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
@@ -1092,8 +1104,12 @@ func ConcatSeq(seq iter.Seq[Task]) Task {
 // MergeSeq returns a [Task] that runs each of the tasks from seq in its own
 // child coroutine concurrently until all of them complete, and then ends.
 // The argument concurrency specifies the maximum number of tasks that can
-// coexist at the same time. If it is zero, no tasks will be run and MergeSeq
+// run at the same time. If it is zero, no tasks will be run and MergeSeq
 // never ends. It may wrap around. The maximum value of concurrency is -1.
+//
+// Caveat: requires spawning a goroutine (which is stackful) when running
+// the returned task. The goroutine leaks, as well as the coroutine that runs
+// the returned task, if the returned task never ends.
 func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
