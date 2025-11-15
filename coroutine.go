@@ -25,6 +25,7 @@ const (
 	flagEnded
 	flagExiting
 	flagPanicking
+	flagForcedExiting
 	flagRecyclable
 	flagRecycled
 	flagEscaped
@@ -50,7 +51,7 @@ const (
 // the return value of the task function.
 // A coroutine can transition from one task to another until a task ends it.
 type Coroutine struct {
-	flag        uint8
+	flag        uint16
 	level       uint32
 	weight      Weight
 	parent      *Coroutine
@@ -191,6 +192,10 @@ func (co *Coroutine) run() (yielded bool) {
 
 		if !ps.Try(func() { res = co.task(co) }) {
 			res = co.panic()
+		}
+
+		if res.action == doYield && co.flag&flagForcedExiting != 0 {
+			res = co.forcedExit()
 		}
 
 		if res.action != doYield && res.action != doTransition {
@@ -350,7 +355,7 @@ type childCoroutineCleanup Coroutine
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
 	co.guard = nil
-	co.task = Exit()
+	co.task = (*Coroutine).forcedExit
 	if yielded := co.run(); yielded {
 		panic("async: internal error: child coroutine did not end")
 	}
@@ -420,7 +425,7 @@ func (co *Coroutine) Unescape() {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	if co.flag&(flagEnded|flagExiting) != 0 {
+	if co.flag&(flagEnded|flagForcedExiting) != 0 {
 		return
 	}
 	for _, d := range ev {
@@ -638,13 +643,7 @@ func (pr PendingResult) Until(f func() bool) PendingResult {
 // Await returns a [PendingResult] that can be transformed into a [Result]
 // with one of its methods, which will then cause co to yield.
 // Await also accepts additional events to watch.
-//
-// Yielding is not allowed when a coroutine is exiting.
-// If co is exiting, Await panics.
 func (co *Coroutine) Await(ev ...Event) PendingResult {
-	if co.Exiting() {
-		panic("async: yielding while exiting")
-	}
 	if len(ev) != 0 {
 		co.Watch(ev...)
 	}
@@ -654,9 +653,6 @@ func (co *Coroutine) Await(ev ...Event) PendingResult {
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
 // reiterate the running task.
 // Yield also accepts additional events to watch.
-//
-// Yielding is not allowed when a coroutine is exiting.
-// If co is exiting, Yield panics.
 func (co *Coroutine) Yield(ev ...Event) Result {
 	return co.Await(ev...).Reiterate()
 }
@@ -692,6 +688,11 @@ func (co *Coroutine) Return() Result {
 // All deferred tasks will be run before co exits.
 func (co *Coroutine) Exit() Result {
 	co.flag |= flagExiting
+	return Result{action: doRaise}
+}
+
+func (co *Coroutine) forcedExit() Result {
+	co.flag |= flagExiting | flagForcedExiting
 	return Result{action: doRaise}
 }
 
