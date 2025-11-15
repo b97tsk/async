@@ -31,7 +31,7 @@ import (
 type Executor struct {
 	mu      sync.Mutex
 	pq      priorityqueue[*Coroutine]
-	pc      paniccatcher
+	ps      panicstack
 	running bool
 	autorun func()
 	pool    atomic.Pointer[sync.Pool]
@@ -77,13 +77,13 @@ func (e *Executor) Run() {
 		e.runCoroutine(co)
 	}
 
-	pc := e.pc
-	e.pc.Reset()
+	ps := e.ps
+	e.ps = nil
 
 	e.running = false
 	e.mu.Unlock()
 
-	pc.Repanic()
+	ps.Repanic()
 }
 
 // Spawn creates a coroutine with default weight to work on t.

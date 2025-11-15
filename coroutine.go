@@ -11,12 +11,12 @@ const (
 	_ action = iota
 	doYield
 	doTransition
+	doTailTransition // Do transition and remove controller.
 	doEnd
 	doBreak
 	doContinue
 	doReturn
-	doExit
-	doTailTransition // Do transition and remove controller.
+	doRaise // Exit or panic.
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 	flagEnqueued
 	flagEnded
 	flagExiting
-	flagManaged
+	flagPanicking
 	flagRecyclable
 	flagRecycled
 	flagEscaped
@@ -55,6 +55,7 @@ type Coroutine struct {
 	weight      Weight
 	parent      *Coroutine
 	executor    *Executor
+	ps          panicstack
 	guard       func() bool
 	task        Task
 	deps        map[Event]struct{}
@@ -78,6 +79,8 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 		co.flag |= flagRecycled
 		co.parent = nil
 		co.executor = nil
+		clear(co.ps)
+		co.ps = co.ps[:0]
 		co.task = nil
 		e.coroutinePool().Put(co)
 	}
@@ -164,15 +167,15 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 func (co *Coroutine) run() (yielded bool) {
 	var res Result
 
-	pc := &co.executor.pc
+	ps := &co.ps
 	guard := co.guard
 
 	for {
 		if guard != nil {
 			var ok bool
-			if !pc.Try(func() { ok = guard() }) {
+			if !ps.Try(func() { ok = guard() }) {
 				ok = true
-				co.task = Exit()
+				co.task = (*Coroutine).panic
 			}
 			if !ok {
 				return true
@@ -186,20 +189,27 @@ func (co *Coroutine) run() (yielded bool) {
 
 		co.flag &^= flagResumed | flagEnded
 
-		if !pc.Try(func() { res = co.task(co) }) {
-			res = co.Exit()
+		if !ps.Try(func() { res = co.task(co) }) {
+			res = co.panic()
 		}
 
 		if res.action != doYield && res.action != doTransition {
+			co.clearDeps()
+			co.clearCleanups()
+			if co.Panicking() {
+				res = co.panic()
+			}
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
 				c := &controllers[i]
-				if !pc.Try(func() { res = c.negotiate(co, res) }) {
-					res = c.negotiate(co, co.Exit())
+				if !ps.Try(func() { res = c.negotiate(co, res) }) {
+					res = c.negotiate(co, co.panic())
 				}
 				if res.action != doTransition {
-					pc.Try(c.cleanup)
+					if !ps.Try(c.cleanup) {
+						res = co.panic()
+					}
 					controllers[i] = controller{}
 					controllers = controllers[:i]
 					co.controllers = controllers
@@ -210,8 +220,8 @@ func (co *Coroutine) run() (yielded bool) {
 			}
 			if res.action != doTransition && res.action != doTailTransition {
 				rootController := &controller{kind: funcController}
-				if !pc.Try(func() { res = rootController.negotiate(co, res) }) {
-					res = rootController.negotiate(co, co.Exit())
+				if !ps.Try(func() { res = rootController.negotiate(co, res) }) {
+					res = rootController.negotiate(co, co.panic())
 				}
 			}
 			if res.action == doTailTransition {
@@ -235,12 +245,12 @@ func (co *Coroutine) run() (yielded bool) {
 
 		if res.controller.kind != 0 {
 			addController := true
-			if res.controller.kind == funcController {
-				lastControllerKind := funcController
+			if res.controller.kind == funcController && !res.controller.wasExiting && !res.controller.wasPanicking {
+				lastController := &controller{kind: funcController}
 				if n := len(co.controllers); n != 0 {
-					lastControllerKind = co.controllers[n-1].kind
+					lastController = &co.controllers[n-1]
 				}
-				if lastControllerKind == funcController {
+				if lastController.kind == funcController && lastController.numDefer == res.controller.numDefer {
 					// Tail-call optimization:
 					// If the last controller is also a funcController, do not add another one.
 					// (doTailTransition also pays tribute to this optimization.)
@@ -269,6 +279,18 @@ func (co *Coroutine) run() (yielded bool) {
 	co.clearCleanups()
 	co.removeFromParent()
 
+	if co.Panicking() {
+		if parent := co.parent; parent != nil {
+			parent.flag |= flagPanicking
+			parent.guard = nil
+			parent.task = (*Coroutine).panic
+			parent.ps = append(parent.ps, co.ps...)
+			parent.Resume()
+		} else {
+			co.executor.ps = append(co.executor.ps, co.ps...)
+		}
+	}
+
 	if len(co.defers) != 0 {
 		panic("async: internal error: not all deferred tasks are handled")
 	}
@@ -293,24 +315,28 @@ func (co *Coroutine) clearDeps() {
 }
 
 func (co *Coroutine) clearCleanups() {
-	pc := &co.executor.pc
+	ok := true
 	cleanups := co.cleanups
 	for len(co.cleanups) != 0 {
 		cleanups := co.cleanups
 		co.cleanups = nil
 		for _, c := range slices.Backward(cleanups) {
-			pc.Try(c.Cleanup)
+			ok = co.ps.Try(c.Cleanup) && ok
 		}
 	}
 	clear(cleanups)
 	co.cleanups = cleanups[:0]
+	if !ok {
+		co.flag |= flagPanicking
+		co.task = (*Coroutine).panic
+	}
 }
 
 func (co *Coroutine) removeFromParent() {
-	if co.flag&flagManaged == 0 {
+	parent := co.parent
+	if parent == nil {
 		return
 	}
-	parent := co.parent
 	for i, c := range parent.cleanups {
 		if c == (*childCoroutineCleanup)(co) {
 			parent.cleanups = slices.Delete(parent.cleanups, i, i+1)
@@ -323,7 +349,6 @@ type childCoroutineCleanup Coroutine
 
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
-	co.flag &^= flagManaged
 	co.guard = nil
 	co.task = Exit()
 	if yielded := co.run(); yielded {
@@ -352,8 +377,19 @@ func (co *Coroutine) Ended() bool {
 }
 
 // Exiting reports whether co is exiting.
+//
+// When exiting, entering a [Func], in a deferred task, would temporarily
+// reset Exiting to false until that [Func] ends or exits again.
 func (co *Coroutine) Exiting() bool {
 	return co.flag&flagExiting != 0
+}
+
+// Panicking reports whether co is panicking.
+//
+// When panicking, entering a [Func], in a deferred task, would temporarily
+// reset Panicking to false until that [Func] ends or panics again.
+func (co *Coroutine) Panicking() bool {
+	return co.flag&flagPanicking != 0
 }
 
 // Resumed reports whether co has been resumed.
@@ -448,7 +484,39 @@ func (co *Coroutine) Defer(t Task) {
 	co.defers = append(co.defers, t)
 }
 
+// Recover returns the latest value in the panic stack and stops co from
+// panicking.
+// If co isn't panicking, Recover returns nil.
+//
+// One might be tempted to use the built-in panic function and this method to
+// mimic the power of try-catch statement in some other programming languages,
+// but there's a cost.
+// In order to be able to continue running, when there's a panic, a coroutine
+// immediately recovers it and puts it into the panic stack, along with a stack
+// trace returned by [runtime/debug.Stack], which might take thousands of bytes.
+//
+// Instead of using the built-in panic function to trigger a panic, one could
+// consider use [Coroutine.Throw] to mimic one, which leaves no stack trace
+// behind.
+func (co *Coroutine) Recover() (v any) {
+	v, _ = co.Recover2()
+	return v
+}
+
+// Recover2 is like [Coroutine.Recover] but also returns the stack trace.
+func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
+	if !co.Panicking() {
+		return nil, nil
+	}
+	p := &co.ps[len(co.ps)-1]
+	p.recovered = true
+	co.flag &^= flagPanicking
+	return p.value, p.stack
+}
+
 // Spawn creates a child coroutine with the same weight as co to work on t.
+//
+// Spawn runs t immediately. If t panics immediately, Spawn panics too.
 //
 // Child coroutines, if not yet ended, are forcedly exited when the parent one
 // resumes or ends or exits, or when the parent one is making a transition to
@@ -466,9 +534,12 @@ func (co *Coroutine) Spawn(t Task) {
 	child := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
 	child.parent = co
 
-	if yielded := child.run(); yielded {
-		child.flag |= flagManaged
+	switch yielded := child.run(); {
+	case yielded:
 		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))
+	case co.Panicking():
+		// child panics.
+		panic(dummy{}) // Stop current task.
 	}
 }
 
@@ -486,7 +557,8 @@ func (co *Coroutine) Spawn(t Task) {
 //   - [Coroutine.Break]: for breaking a [Loop] (or [LoopN]);
 //   - [Coroutine.Continue]: for continuing a [Loop] (or [LoopN]);
 //   - [Coroutine.Return]: for returning from a [Func];
-//   - [Coroutine.Exit]: for ending a coroutine forcedly.
+//   - [Coroutine.Exit]: for exiting a coroutine;
+//   - [Coroutine.Throw]: for simulating a panic.
 //
 // These methods may have side effects. One should never store a Result in
 // a variable and overwrite it with another, before returning it. Instead,
@@ -546,6 +618,14 @@ func (pr PendingResult) Return() Result {
 // when resumed, cause the running coroutine to exit.
 func (pr PendingResult) Exit() Result {
 	return pr.Then(Exit())
+}
+
+// Throw returns a [Result] that will cause the running coroutine to yield and,
+// when resumed, cause the running coroutine to behave like there's a panic.
+// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Please use with caution.
+func (pr PendingResult) Throw(v any) Result {
+	return pr.Then(Throw(v))
 }
 
 // Until transforms pr into one with a condition.
@@ -612,10 +692,27 @@ func (co *Coroutine) Return() Result {
 // All deferred tasks will be run before co exits.
 func (co *Coroutine) Exit() Result {
 	co.flag |= flagExiting
-	return Result{action: doExit}
+	return Result{action: doRaise}
 }
 
-type controllerKind int
+func (co *Coroutine) panic() Result {
+	co.flag |= flagPanicking
+	return Result{action: doRaise}
+}
+
+// Throw returns a [Result] that will cause co to behave like there's a panic.
+// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Please use with caution.
+func (co *Coroutine) Throw(v any) Result {
+	if v == nil {
+		panic("async: Throw called with nil argument")
+	}
+	co.ps.push(v, nil)
+	co.flag |= flagPanicking
+	return Result{action: doRaise}
+}
+
+type controllerKind int8
 
 const (
 	_ controllerKind = iota
@@ -627,19 +724,27 @@ const (
 )
 
 type controller struct {
-	kind     controllerKind
-	numDefer int                 // used by funcController only
-	task     Task                // used by thenController and loopController
-	tasks    []Task              // used by blockController only
-	next     func() (Task, bool) // used by seqController only
-	stop     func()              // used by seqController only
+	kind         controllerKind
+	wasExiting   bool                // used by funcController only
+	wasPanicking bool                // used by funcController only
+	numPanic     int                 // used by funcController only
+	numDefer     int                 // used by funcController only
+	task         Task                // used by thenController and loopController
+	tasks        []Task              // used by blockController only
+	next         func() (Task, bool) // used by seqController only
+	stop         func()              // used by seqController only
 }
 
 func (c *controller) negotiate(co *Coroutine, res Result) Result {
 	switch c.kind {
 	case funcController:
 		switch res.action {
-		case doEnd, doReturn, doExit:
+		case doEnd, doReturn, doRaise:
+			if !co.Panicking() && len(co.ps) > c.numPanic {
+				// Discard recovered panic values.
+				clear(co.ps[c.numPanic:])
+				co.ps = co.ps[:c.numPanic]
+			}
 			if len(co.defers) > c.numDefer {
 				i := len(co.defers) - 1
 				t := co.defers[i]
@@ -647,8 +752,15 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				co.defers = co.defers[:i]
 				return co.Transition(t)
 			}
-			if co.Exiting() {
-				return co.Exit()
+			raise := co.flag&(flagExiting|flagPanicking) != 0
+			if c.wasExiting {
+				co.flag |= flagExiting
+			}
+			if c.wasPanicking {
+				co.flag |= flagPanicking
+			}
+			if raise {
+				return Result{action: doRaise}
 			}
 			return co.End()
 		case doBreak:
@@ -844,15 +956,33 @@ func Exit() Task {
 	return (*Coroutine).Exit
 }
 
+// Throw returns a [Task] that causes the coroutine that runs it to behave
+// like there's a panic.
+// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Please use with caution.
+func Throw(v any) Task {
+	return func(co *Coroutine) Result {
+		return co.Throw(v)
+	}
+}
+
 // Func returns a [Task] that runs t in a function scope.
 // Spawned tasks are considered surrounded by an invisible [Func].
 func Func(t Task) Task {
 	return func(co *Coroutine) Result {
-		return Result{
-			action:     doTransition,
-			task:       must(t),
-			controller: controller{kind: funcController, numDefer: len(co.defers)},
+		res := Result{
+			action: doTransition,
+			task:   must(t),
+			controller: controller{
+				kind:         funcController,
+				wasExiting:   co.Exiting(),
+				wasPanicking: co.Panicking(),
+				numPanic:     len(co.ps),
+				numDefer:     len(co.defers),
+			},
 		}
+		co.flag &^= flagExiting | flagPanicking
+		return res
 	}
 }
 

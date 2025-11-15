@@ -772,79 +772,6 @@ func ExampleFunc_exit() {
 	// 9
 }
 
-// This example demonstrates how async can handle panickings.
-func ExampleFunc_panic() {
-	dummyError := errors.New("dummy")
-
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(func() {
-		defer func() {
-			v := recover()
-			if v == nil {
-				return
-			}
-			err, ok := v.(error)
-			if ok && errors.Is(err, dummyError) && strings.Contains(err.Error(), "dummy") {
-				// Use of strings.Contains(...) here is for code coverage, not that it is necessary.
-				fmt.Println("recovered dummy error")
-				return
-			}
-			panic(v) // Repanic unexpected recovered value.
-		}()
-		myExecutor.Run()
-	})
-
-	var myState async.State[int]
-
-	myExecutor.Spawn(async.Block(
-		async.Defer( // Note that spawned tasks are considered surrounded by an invisible async.Func.
-			async.Do(func() { fmt.Println("defer 1") }),
-		),
-		async.Func(async.Block( // A block in a function scope.
-			async.Defer(
-				async.Do(func() { fmt.Println("defer 2") }),
-			),
-			async.Loop(async.Block(
-				async.Await(&myState),
-				func(co *async.Coroutine) async.Result {
-					if v := myState.Get(); v%2 == 0 {
-						return co.Continue()
-					}
-					return co.End()
-				},
-				async.Do(func() {
-					fmt.Println(myState.Get())
-				}),
-				func(co *async.Coroutine) async.Result {
-					if v := myState.Get(); v >= 7 {
-						panic(dummyError) // Panic here.
-					}
-					return co.End()
-				},
-			)),
-			async.Do(func() { fmt.Println("after Loop") }), // Didn't run due to early panicking.
-		)),
-		async.Do(func() { fmt.Println("after Func") }), // Didn't run due to early panicking.
-	))
-
-	for i := 1; i <= 9; i++ {
-		myExecutor.Spawn(async.Do(func() { myState.Set(i) }))
-	}
-
-	fmt.Println(myState.Get()) // Prints 9.
-
-	// Output:
-	// 1
-	// 3
-	// 5
-	// 7
-	// defer 2
-	// defer 1
-	// recovered dummy error
-	// 9
-}
-
 // This example demonstrates how to make tail-calls in an [async.Func].
 // Tail-calls are not recommended and should be avoided when possible.
 // Without tail-call optimization, this example shall panic.
@@ -1190,4 +1117,178 @@ func ExampleMergeSeq() {
 	// 5
 	// 6
 	// done
+}
+
+// This example demonstrates how async handles panics.
+func Example_panicAndRecover() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	dummyError := errors.New("dummy")
+
+	myExecutor.Autorun(func() {
+		wg.Go(func() {
+			defer func() {
+				if v := recover(); v != nil {
+					err, ok := v.(error)
+					if ok && errors.Is(err, dummyError) && strings.Contains(err.Error(), "dummy") {
+						fmt.Println("dummy error recovered!")
+						return
+					}
+					panic(v) // Repanic unexpected values.
+				}
+			}()
+			myExecutor.Run()
+		})
+	})
+
+	sleep := func(d time.Duration) async.Task {
+		return func(co *async.Coroutine) async.Result {
+			co.Escape()
+			wg.Add(1) // Keep track of timers too.
+			tm := time.AfterFunc(d, func() {
+				defer wg.Done()
+				myExecutor.Spawn(async.Do(func() {
+					co.Unescape()
+					co.Resume()
+				}))
+			})
+			co.CleanupFunc(func() {
+				if tm.Stop() {
+					wg.Done()
+					co.Unescape()
+				}
+			})
+			return co.Await().End()
+		}
+	}
+
+	recover := func(co *async.Coroutine) async.Result {
+		if v := co.Recover(); v != nil {
+			fmt.Println(v)
+		}
+		return co.End()
+	}
+
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		co.Defer(recover)
+		panic("A")
+	})
+
+	wg.Wait()
+
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		// Cleanups are Task-scoped, while defers are Func-scoped.
+		co.CleanupFunc(func() { panic("A") }) // Goes out of scope first.
+		co.Defer(recover)
+		return co.End()
+	})
+
+	wg.Wait()
+
+	myExecutor.Spawn(async.Join(
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			co.Spawn(func(_ *async.Coroutine) async.Result {
+				panic("A") // Child coroutines propagate panics.
+			})
+			panic("B") // Didn't run.
+		},
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			co.Spawn(sleep(100 * time.Millisecond).Then(async.Do(func() { panic("A") })))
+			return co.Await().End()
+		},
+	))
+
+	wg.Wait()
+
+	myExecutor.Spawn(async.Join(
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover) // Recovers the whole panic stack (but only given the latest one).
+			co.Defer(func(_ *async.Coroutine) async.Result {
+				panic("B") // Panics stack up.
+			})
+			panic("A")
+		},
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover) // Recovers "C" (with "A" being discarded).
+			co.Defer(async.Block(
+				// async.Func introduces a new scope for panic recovering.
+				async.Func(func(co *async.Coroutine) async.Result {
+					co.Defer(recover) // Recovers "B", while "A" remains in the panic stack.
+					panic("B")
+				}),
+				async.Do(func() { panic("C") }), // Stacks up onto "A".
+			))
+			panic("A")
+		},
+	))
+
+	wg.Wait()
+
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		co.Defer(recover)
+		return co.Await().Until(func() bool { panic("A") }).End()
+	})
+
+	wg.Wait()
+
+	myExecutor.Spawn(async.Join(
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			return co.Transition(async.FromSeq(func(yield func(async.Task) bool) {
+				panic("A")
+			}))
+		},
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			return co.Transition(async.FromSeq(func(yield func(async.Task) bool) {
+				yield(async.Return())
+				panic("A")
+			}))
+		},
+	))
+
+	wg.Wait()
+
+	myExecutor.Spawn(async.Join(
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			return co.Break() // Break without a loop.
+		},
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			return co.Continue() // Continue without a loop.
+		},
+		func(co *async.Coroutine) async.Result {
+			co.Defer(recover)
+			return co.Throw("A") // Throw is like panic but leaves no stack trace behind.
+		},
+	))
+
+	wg.Wait()
+
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		panic(dummyError) // Unrecovered panics get repanicked when (*async.Executor).Run returns.
+	})
+
+	wg.Wait()
+
+	// Output:
+	// A
+	// A
+	// A
+	// A
+	// B
+	// B
+	// C
+	// A
+	// A
+	// A
+	// async: unhandled break action
+	// async: unhandled continue action
+	// A
+	// dummy error recovered!
 }
