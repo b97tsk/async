@@ -199,7 +199,7 @@ func (co *Coroutine) run() (yielded bool) {
 			res = co.panic()
 		}
 
-		if res.action == doYield && co.flag&flagCanceled != 0 {
+		if res.action == doYield && co.Canceled() {
 			res = co.cancel()
 		}
 
@@ -381,6 +381,11 @@ func (co *Coroutine) Executor() *Executor {
 	return co.executor
 }
 
+// Resumed reports whether co has been resumed.
+func (co *Coroutine) Resumed() bool {
+	return co.flag&flagResumed != 0
+}
+
 // Ended reports whether co has already ended (or exited).
 func (co *Coroutine) Ended() bool {
 	return co.flag&flagEnded != 0
@@ -402,9 +407,9 @@ func (co *Coroutine) Panicking() bool {
 	return co.flag&flagPanicking != 0
 }
 
-// Resumed reports whether co has been resumed.
-func (co *Coroutine) Resumed() bool {
-	return co.flag&flagResumed != 0
+// Canceled reports whether co has been canceled.
+func (co *Coroutine) Canceled() bool {
+	return co.flag&flagCanceled != 0
 }
 
 // Escape marks co as an escaped coroutine, preventing co from being put into
