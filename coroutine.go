@@ -174,13 +174,18 @@ func (co *Coroutine) run() (yielded bool) {
 	for {
 		if guard != nil {
 			var ok bool
+
+			co.flag &^= flagResumed
+
 			if !ps.Try(func() { ok = guard() }) {
-				ok = true
 				co.task = (*Coroutine).panic
+				ok = true
 			}
+
 			if !ok {
 				return true
 			}
+
 			guard = nil
 			co.guard = nil
 		}
@@ -188,7 +193,7 @@ func (co *Coroutine) run() (yielded bool) {
 		co.clearDeps()
 		co.clearCleanups()
 
-		co.flag &^= flagResumed | flagEnded
+		co.flag &^= flagResumed | flagEnded // Clear flagEnded for Memo.
 
 		if !ps.Try(func() { res = co.task(co) }) {
 			res = co.panic()
