@@ -25,7 +25,7 @@ const (
 	flagEnded
 	flagExiting
 	flagPanicking
-	flagForcedExiting
+	flagCanceled
 	flagRecyclable
 	flagRecycled
 	flagEscaped
@@ -199,8 +199,8 @@ func (co *Coroutine) run() (yielded bool) {
 			res = co.panic()
 		}
 
-		if res.action == doYield && co.flag&flagForcedExiting != 0 {
-			res = co.forcedExit()
+		if res.action == doYield && co.flag&flagCanceled != 0 {
+			res = co.cancel()
 		}
 
 		if res.action != doYield && res.action != doTransition {
@@ -360,7 +360,7 @@ type childCoroutineCleanup Coroutine
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
 	co.guard = nil
-	co.task = (*Coroutine).forcedExit
+	co.task = (*Coroutine).cancel
 	if yielded := co.run(); yielded {
 		panic("async: internal error: child coroutine did not end")
 	}
@@ -430,7 +430,7 @@ func (co *Coroutine) Unescape() {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	if co.flag&(flagEnded|flagForcedExiting) != 0 {
+	if co.flag&(flagEnded|flagCanceled) != 0 {
 		return
 	}
 	for _, d := range ev {
@@ -528,9 +528,11 @@ func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
 //
 // Spawn runs t immediately. If t panics immediately, Spawn panics too.
 //
-// Child coroutines, if not yet ended, are forcedly exited when the parent one
-// resumes or ends or exits, or when the parent one is making a transition to
-// work on another [Task].
+// Child coroutines, if not yet ended, are canceled when the parent one resumes
+// or ends or exits, or when the parent one is making a transition to work on
+// another [Task].
+// When a coroutine is canceled, it runs to completion with all yield points
+// treated like exit points.
 func (co *Coroutine) Spawn(t Task) {
 	if co.Ended() {
 		panic("async: coroutine has already ended")
@@ -696,8 +698,8 @@ func (co *Coroutine) Exit() Result {
 	return Result{action: doRaise}
 }
 
-func (co *Coroutine) forcedExit() Result {
-	co.flag |= flagExiting | flagForcedExiting
+func (co *Coroutine) cancel() Result {
+	co.flag |= flagExiting | flagCanceled
 	return Result{action: doRaise}
 }
 
@@ -1045,8 +1047,8 @@ func Join(s ...Task) Task {
 
 // Select returns a [Task] that runs each of the given tasks in its own
 // child coroutine and awaits until any of them completes, and then ends.
-// When Select ends, tasks other than the one that completes are forcedly
-// exited.
+// When Select ends, tasks other than the one that completes are canceled
+// (see [Coroutine.Spawn]).
 //
 // When passed no arguments, Select returns a [Task] that never ends.
 func Select(s ...Task) Task {
