@@ -24,7 +24,7 @@ func Example() {
 	op := async.NewState('+')
 
 	// Although states can be created without the help of executors,
-	// they might only be safe for use by one and only one executor because of data races.
+	// they might only be safe for use by one and only one executor due to the concern of data races.
 	// Without proper synchronization, it's better only to spawn coroutines to read or update states.
 
 	// Create a coroutine to print the sum or the product of s1 and s2, depending on what op is.
@@ -1039,13 +1039,28 @@ func ExampleMergeSeq() {
 		}
 	}
 
+	myExecutor.Spawn(async.MergeSeq(3, func(yield func(async.Task) bool) {
+		defer fmt.Println("done")
+		for n := 1; n <= 6; n++ {
+			d := time.Duration(n*100) * time.Millisecond
+			f := func() { fmt.Println(n) }
+			t := sleep(d).Then(async.Do(f))
+			if !yield(t) {
+				return
+			}
+		}
+	}))
+
+	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
+
 	myExecutor.Spawn(async.Select(
 		sleep(1000*time.Millisecond), // Cancel the following task after a period of time.
 		async.MergeSeq(3, func(yield func(async.Task) bool) {
 			defer fmt.Println("done")
-			for i := 1; ; i++ {
-				d := time.Duration(i*100) * time.Millisecond
-				f := func() { fmt.Println(i) }
+			for n := 1; ; n++ { // Infinite loop.
+				d := time.Duration(n*100) * time.Millisecond
+				f := func() { fmt.Println(n) }
 				t := sleep(d).Then(async.Do(f))
 				if !yield(t) {
 					return
@@ -1057,6 +1072,14 @@ func ExampleMergeSeq() {
 	wg.Wait()
 
 	// Output:
+	// 1
+	// 2
+	// 3
+	// 4
+	// done
+	// 5
+	// 6
+	// --- SEPARATOR ---
 	// 1
 	// 2
 	// 3
@@ -1124,6 +1147,7 @@ func Example_panicAndRecover() {
 	})
 
 	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		// Cleanups are Task-scoped, while defers are Func-scoped.
@@ -1133,91 +1157,110 @@ func Example_panicAndRecover() {
 	})
 
 	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Join(
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			co.Spawn(func(_ *async.Coroutine) async.Result {
-				panic("A") // Child coroutines propagate panics.
-			})
-			panic("B") // Didn't run.
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			co.Spawn(sleep(100 * time.Millisecond).Then(async.Do(func() { panic("A") })))
-			return co.Await().End()
-		},
+		async.Block(
+			async.Defer(recover),
+			func(co *async.Coroutine) async.Result {
+				co.Spawn(func(_ *async.Coroutine) async.Result {
+					panic("A") // Child coroutines propagate panics.
+				})
+				panic("B") // Didn't run.
+			},
+		),
+		async.Block(
+			async.Defer(recover),
+			func(co *async.Coroutine) async.Result {
+				co.Spawn(async.Block(
+					sleep(100*time.Millisecond),
+					async.Do(func() { panic("A") }), // Panics after 100ms.
+				))
+				co.Spawn(async.Block(
+					async.Defer(async.Do(func() { fmt.Println("canceled") })),
+					async.Await(), // This child coroutine never ends, but it can be canceled.
+				))
+				return co.Await().End()
+			},
+		),
 	))
 
 	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Join(
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover) // Recovers the whole panic stack (but only given the latest one).
-			co.Defer(func(_ *async.Coroutine) async.Result {
+		async.Block(
+			async.Defer(recover), // Recovers the whole panic stack (but only given the latest one).
+			async.Defer(func(_ *async.Coroutine) async.Result {
 				panic("B") // Panics stack up.
-			})
-			panic("A")
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover) // Recovers "C" (with "A" being discarded).
-			co.Defer(async.Block(
+			}),
+			async.Do(func() { panic("A") }),
+		),
+		async.Block(
+			async.Defer(recover), // Recovers "C", while "A" is discarded.
+			async.Defer(async.Block(
 				// async.Func introduces a new scope for panic recovering.
 				async.Func(func(co *async.Coroutine) async.Result {
 					co.Defer(recover) // Recovers "B", while "A" remains in the panic stack.
 					panic("B")
 				}),
 				async.Do(func() { panic("C") }), // Stacks up onto "A".
-			))
-			panic("A")
+			)),
+			async.Do(func() { panic("A") }),
+		),
+	))
+
+	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
+
+	myExecutor.Spawn(async.Block(
+		async.Defer(recover),
+		func(co *async.Coroutine) async.Result {
+			return co.Await().Until(func() bool { panic("A") }).End()
 		},
 	))
 
 	wg.Wait()
-
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		co.Defer(recover)
-		return co.Await().Until(func() bool { panic("A") }).End()
-	})
-
-	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Join(
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			return co.Transition(async.FromSeq(func(yield func(async.Task) bool) {
+		async.Block(
+			async.Defer(recover),
+			async.FromSeq(func(yield func(async.Task) bool) {
 				panic("A")
-			}))
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			return co.Transition(async.FromSeq(func(yield func(async.Task) bool) {
+			}),
+		),
+		async.Block(
+			async.Defer(recover),
+			async.FromSeq(func(yield func(async.Task) bool) {
 				yield(async.Return())
 				panic("A")
-			}))
-		},
+			}),
+		),
 	))
 
 	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Join(
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			return co.Break() // Break without a loop.
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			return co.Continue() // Continue without a loop.
-		},
-		func(co *async.Coroutine) async.Result {
-			co.Defer(recover)
-			return co.Throw("A") // Throw is like panic but leaves no stack trace behind.
-		},
+		async.Block(
+			async.Defer(recover),
+			async.Break(), // Break without a loop.
+		),
+		async.Block(
+			async.Defer(recover),
+			async.Continue(), // Continue without a loop.
+		),
+		async.Block(
+			async.Defer(recover),
+			async.Throw("A"), // Throw is like panic but leaves no stack trace behind.
+		),
 	))
 
 	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
 
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+	myExecutor.Spawn(func(_ *async.Coroutine) async.Result {
 		panic(dummyError) // Unrecovered panics get repanicked when (*async.Executor).Run returns.
 	})
 
@@ -1225,17 +1268,25 @@ func Example_panicAndRecover() {
 
 	// Output:
 	// A
+	// --- SEPARATOR ---
 	// A
+	// --- SEPARATOR ---
 	// A
+	// canceled
 	// A
+	// --- SEPARATOR ---
 	// B
 	// B
 	// C
+	// --- SEPARATOR ---
+	// A
+	// --- SEPARATOR ---
 	// A
 	// A
-	// A
+	// --- SEPARATOR ---
 	// async: unhandled break action
 	// async: unhandled continue action
 	// A
+	// --- SEPARATOR ---
 	// dummy error recovered!
 }
