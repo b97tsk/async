@@ -1090,29 +1090,6 @@ func Spawn(t Task) Task {
 	}
 }
 
-// ConcatSeq returns a [Task] that runs each of the tasks from seq in its own
-// child coroutine sequentially until all of them complete, and then ends.
-//
-// Caveat: requires spawning a goroutine (which is stackful) when running
-// the returned task. The goroutine leaks, as well as the coroutine that runs
-// the returned task, if the returned task never ends.
-func ConcatSeq(seq iter.Seq[Task]) Task {
-	return func(co *Coroutine) Result {
-		next, stop := iter.Pull(seq)
-		co.CleanupFunc(stop)
-		return co.Await().Until(func() bool {
-			t, ok := next()
-			if ok {
-				co.Spawn(func(co *Coroutine) Result {
-					co.Defer(resumeParent)
-					return co.Transition(t)
-				})
-			}
-			return !ok
-		}).End()
-	}
-}
-
 // MergeSeq returns a [Task] that runs each of the tasks from seq in its own
 // child coroutine concurrently until all of them complete, and then ends.
 // The argument concurrency specifies the maximum number of tasks that can
