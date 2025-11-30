@@ -207,7 +207,7 @@ func (co *Coroutine) run() (yielded bool) {
 			co.clearDeps()
 			co.clearCleanups()
 			if co.Panicking() {
-				res = co.panic()
+				res = co.raise()
 			}
 			controllers := co.controllers
 			for len(controllers) != 0 {
@@ -359,8 +359,9 @@ type childCoroutineCleanup Coroutine
 
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
+	co.flag |= flagExiting | flagCanceled
 	co.guard = nil
-	co.task = (*Coroutine).cancel
+	co.task = (*Coroutine).raise
 	if yielded := co.run(); yielded {
 		panic("async: internal error: child coroutine did not end")
 	}
@@ -710,6 +711,10 @@ func (co *Coroutine) cancel() Result {
 
 func (co *Coroutine) panic() Result {
 	co.flag |= flagPanicking
+	return Result{action: doRaise}
+}
+
+func (co *Coroutine) raise() Result {
 	return Result{action: doRaise}
 }
 

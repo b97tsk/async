@@ -1178,6 +1178,10 @@ func Example_panicAndRecover() {
 				))
 				co.Spawn(async.Block(
 					async.Defer(async.Do(func() { fmt.Println("canceled") })),
+					async.Defer(async.Block(
+						async.Await(),                   // Canceled coroutines cannot yield.
+						async.Do(func() { panic("B") }), // Didn't run.
+					)),
 					async.Await(), // This child coroutine never ends, but it can be canceled.
 				))
 				return co.Await().End()
