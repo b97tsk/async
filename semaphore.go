@@ -31,7 +31,7 @@ func (s *Semaphore) Acquire(n int64) Task {
 		panic("async(Semaphore): negative weight")
 	}
 	return func(co *Coroutine) Result {
-		if s.size-s.cur < n {
+		if s.size-s.cur < n || len(s.waiters) != 0 {
 			if n > s.size {
 				return co.Yield() // Impossible to success.
 			}
@@ -97,6 +97,9 @@ func (w *waiter) Cleanup() {
 func (s *Semaphore) removeWaiter(w *waiter) {
 	if i := slices.Index(s.waiters, w); i != -1 {
 		s.waiters = slices.Delete(s.waiters, i, i+1)
+		if i == 0 && s.size > s.cur {
+			s.notifyWaiters()
+		}
 	}
 }
 
