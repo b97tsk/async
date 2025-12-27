@@ -16,44 +16,82 @@ type Event interface {
 //
 // A Signal must not be shared by more than one [Executor].
 type Signal struct {
-	listeners map[*Coroutine]struct{}
+	a [1]*Coroutine
+	m map[*Coroutine]struct{}
 }
 
 func (s *Signal) addListener(co *Coroutine) {
-	listeners := s.listeners
-	if listeners == nil {
-		listeners = make(map[*Coroutine]struct{})
-		s.listeners = listeners
+	for i, v := range &s.a {
+		if v == nil {
+			s.a[i] = co
+			return
+		}
 	}
-	listeners[co] = struct{}{}
+	m := s.m
+	if m == nil {
+		m = make(map[*Coroutine]struct{})
+		s.m = m
+	}
+	m[co] = struct{}{}
 }
 
 func (s *Signal) removeListener(co *Coroutine) {
-	delete(s.listeners, co)
+	for i, v := range &s.a {
+		if v == co {
+			s.a[i] = nil
+			return
+		}
+	}
+	delete(s.m, co)
 }
 
 // Notify resumes any coroutine that is watching s.
 //
 // One should only call this method in a [Task] function.
 func (s *Signal) Notify() {
-	var e *Executor
+	if s.anyListeners() {
+		s.notify()
+	}
+}
 
-	for co := range s.listeners {
+func (s *Signal) anyListeners() bool {
+	for _, co := range &s.a {
+		if co != nil {
+			return true
+		}
+	}
+	return len(s.m) != 0
+}
+
+func (s *Signal) notify() {
+	var e *Executor
+	defer func() {
+		if e != nil {
+			e.mu.Unlock()
+		}
+	}()
+	s.walk(func(co *Coroutine) {
 		if e == nil {
 			e = co.executor
-
 			e.mu.Lock()
-			defer e.mu.Unlock()
-
 			if !e.running {
 				panic("async(Signal): executor not running")
 			}
 		}
-
 		if e != co.executor {
 			panic("async(Signal): executor inconsistent")
 		}
-
 		e.resumeCoroutine(co, false)
+	})
+}
+
+func (s *Signal) walk(f func(co *Coroutine)) {
+	for _, co := range &s.a {
+		if co != nil {
+			f(co)
+		}
+	}
+	for co := range s.m {
+		f(co)
 	}
 }
