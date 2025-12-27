@@ -13,6 +13,8 @@ import (
 //
 // A Semaphore must not be shared by more than one [Executor].
 type Semaphore struct {
+	_ noCopy
+
 	size    Weight
 	cur     Weight
 	waiters []*waiter

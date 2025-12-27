@@ -32,6 +32,11 @@ const (
 	flagNonRecyclable
 )
 
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
+
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
 // and stackless.
 //
@@ -51,6 +56,8 @@ const (
 // the return value of the task function.
 // A coroutine can transition from one task to another until a task ends it.
 type Coroutine struct {
+	_ noCopy
+
 	flag        uint16
 	level       uint32
 	weight      Weight

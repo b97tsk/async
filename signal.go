@@ -16,6 +16,8 @@ type Event interface {
 //
 // A Signal must not be shared by more than one [Executor].
 type Signal struct {
+	_ noCopy
+
 	a [1]*Coroutine
 	m map[*Coroutine]struct{}
 }
