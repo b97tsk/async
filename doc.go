@@ -80,4 +80,37 @@
 // can be determined too.
 // Essentially, it creates a synchronization point between the spawned tasks
 // and the rest of the code after the waiting.
+//
+// # Root/Child Coroutines
+//
+// Coroutines spawned by an [Executor] are root coroutines.
+// Coroutines spawned by the [Coroutine.Spawn] method, in a [Task] function,
+// are child coroutines.
+//
+// Child coroutines are Task-scoped and, therefore, cancelable.
+// When a [Task] completes, all child coroutines spawned in it are canceled.
+//
+// Conversely, root coroutines are not cancelable.
+// One must cooperatively tell a root coroutine to exit.
+// Though, it's possible to just let them rot in the background. The Go runtime
+// would happily garbage collect them when there are no references to them.
+// However, it's not always clear that this would be the case.
+//
+// By default, canceled child coroutines cannot yield.
+// All yield points are treated like exit points.
+// However, within a [NonCancelable] context, a canceled child coroutine is
+// allowed to yield, which correspondingly causes its parent coroutine to
+// yield, too. In such case, the parent coroutine stays suspended until all
+// its child coroutines complete.
+//
+// # Panic Propagation
+//
+// Child coroutines propagate unrecovered panics to their parent coroutines.
+// Root coroutines propagate unrecovered panics to their [Executor], causing
+// the [Executor.Run] method to panic when it returns.
+//
+// If a coroutine spawns multiple child coroutines and one of them panics
+// without recovering, the coroutine cancels other child coroutines.
+// Then, after all child coroutines complete, the coroutine propagates panics
+// to its parent coroutine, or its [Executor] if it's a root coroutine.
 package async
