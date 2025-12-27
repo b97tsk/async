@@ -28,9 +28,7 @@ const (
 	flagPanicking
 	flagCanceled
 	flagNonCancelable
-	flagRecyclable
-	flagRecycled
-	flagEscaped
+	flagNonRecyclable
 )
 
 // A Coroutine is an execution of code, similar to a goroutine but cooperative
@@ -77,19 +75,20 @@ func (e *Executor) newCoroutine() *Coroutine {
 }
 
 func (e *Executor) freeCoroutine(co *Coroutine) {
-	if co.flag&(flagRecyclable|flagRecycled|flagEscaped) == flagRecyclable {
-		co.flag |= flagRecycled
-		co.parent = nil
-		co.executor = nil
-		clear(co.ps)
-		co.ps = co.ps[:0]
-		co.task = nil
-		e.coroutinePool().Put(co)
+	if co.flag&flagNonRecyclable != 0 {
+		return
 	}
+	co.flag |= flagNonRecyclable
+	co.parent = nil
+	co.executor = nil
+	clear(co.ps)
+	co.ps = co.ps[:0]
+	co.task = nil
+	e.coroutinePool().Put(co)
 }
 
 func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
-	co.flag = flagResumed | flagRecyclable
+	co.flag = flagResumed
 	co.level = 0
 	co.weight = 0
 	co.executor = e
@@ -131,8 +130,8 @@ func (co *Coroutine) Resume() {
 
 func (e *Executor) resumeCoroutine(co *Coroutine, lock bool) {
 	switch flag := co.flag; {
-	case flag&flagRecycled != 0:
-		panic("async: coroutine has been recycled")
+	case flag&flagEnded != 0:
+		panic("async: coroutine has already ended")
 	case flag&flagEnqueued != 0:
 		co.flag = flag | flagResumed
 	default:
@@ -284,7 +283,7 @@ func (co *Coroutine) run() (suspended bool) {
 			if addController {
 				co.controllers = append(co.controllers, res.controller)
 				if capSizeLimit := 1000000; cap(co.controllers) > capSizeLimit {
-					co.flag &^= flagRecyclable
+					co.flag |= flagNonRecyclable
 					co.task = func(co *Coroutine) Result {
 						panic("async: too many controllers or recursions")
 					}
@@ -437,27 +436,6 @@ func (co *Coroutine) Canceled() bool {
 // NonCancelable reports whether co is currently running a [NonCancelable] task.
 func (co *Coroutine) NonCancelable() bool {
 	return co.flag&flagNonCancelable != 0
-}
-
-// Escape marks co as an escaped coroutine, preventing co from being put into
-// pool for recycling.
-// Useful when one wants to access co from another goroutine.
-//
-// Without calling this method, a coroutine may be put into pool for recycling
-// when it ends or exits.
-func (co *Coroutine) Escape() {
-	co.flag |= flagEscaped
-}
-
-// Unescape undoes what [Coroutine.Escape] does so that co can be put into
-// pool again for recycling.
-//
-// Panics if Escape has not yet been called after the last call of Unescape.
-func (co *Coroutine) Unescape() {
-	if co.flag&flagEscaped == 0 {
-		panic("async: coroutine did not escape")
-	}
-	co.flag &^= flagEscaped
 }
 
 // Watch watches some events so that, when any of them notifies, co resumes.
@@ -883,8 +861,8 @@ func (c *controller) cleanup() {
 // The return value of a task, a [Result], determines what next for a coroutine
 // to do.
 //
-// Without calling [Coroutine.Escape], co must not escape to another goroutine
-// because, co may be put into pool for recycling when co ends or exits.
+// The argument co must not escape to a non-child coroutine or another goroutine
+// because, co may be put into pool for later reuse when co ends or exits.
 type Task func(co *Coroutine) Result
 
 // Then returns a [Task] that first works on t, then next after t ends.

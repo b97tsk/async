@@ -963,22 +963,18 @@ func ExampleMergeSeq() {
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
-			co.Escape()
+			var sig async.Signal
 			wg.Add(1) // Keep track of timers too.
 			tm := time.AfterFunc(d, func() {
 				defer wg.Done()
-				myExecutor.Spawn(async.Do(func() {
-					co.Unescape()
-					co.Resume()
-				}))
+				myExecutor.Spawn(async.Do(sig.Notify))
 			})
 			co.CleanupFunc(func() {
 				if tm.Stop() {
 					wg.Done()
-					co.Unescape()
 				}
 			})
-			return co.Await().End()
+			return co.Await(&sig).End()
 		}
 	}
 
@@ -1058,22 +1054,18 @@ func Example_panicAndRecover() {
 
 	sleep := func(d time.Duration) async.Task {
 		return func(co *async.Coroutine) async.Result {
-			co.Escape()
+			var sig async.Signal
 			wg.Add(1) // Keep track of timers too.
 			tm := time.AfterFunc(d, func() {
 				defer wg.Done()
-				myExecutor.Spawn(async.Do(func() {
-					co.Unescape()
-					co.Resume()
-				}))
+				myExecutor.Spawn(async.Do(sig.Notify))
 			})
 			co.CleanupFunc(func() {
 				if tm.Stop() {
 					wg.Done()
-					co.Unescape()
 				}
 			})
-			return co.Await().End()
+			return co.Await(&sig).End()
 		}
 	}
 
