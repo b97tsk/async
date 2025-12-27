@@ -22,10 +22,12 @@ const (
 const (
 	flagResumed = 1 << iota
 	flagEnqueued
+	flagCleanup
 	flagEnded
 	flagExiting
 	flagPanicking
 	flagCanceled
+	flagNonCancelable
 	flagRecyclable
 	flagRecycled
 	flagEscaped
@@ -60,6 +62,7 @@ type Coroutine struct {
 	task        Task
 	deps        map[Event]struct{}
 	cleanups    []Cleanup
+	childnum    int
 	defers      []Task
 	controllers []controller
 }
@@ -158,7 +161,7 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 	}
 }
 
-func (co *Coroutine) run() (yielded bool) {
+func (co *Coroutine) run() (suspended bool) {
 	var res Result
 
 	ps := &co.ps
@@ -171,7 +174,8 @@ func (co *Coroutine) run() (yielded bool) {
 			co.flag &^= flagResumed
 
 			if !ps.Try(func() { ok = guard() }) {
-				co.task = (*Coroutine).panic
+				co.flag |= flagPanicking
+				co.task = (*Coroutine).raise
 				ok = true
 			}
 
@@ -183,25 +187,44 @@ func (co *Coroutine) run() (yielded bool) {
 			co.guard = nil
 		}
 
+		co.flag &^= flagResumed
+		co.flag |= flagCleanup
+
 		co.clearDeps()
 		co.clearCleanups()
 
-		co.flag &^= flagResumed
+		if co.childnum != 0 {
+			return true
+		}
+
+		co.flag &^= flagResumed | flagCleanup
 
 		if !ps.Try(func() { res = co.task(co) }) {
 			res = co.panic()
 		}
 
-		if res.action == doYield && co.Canceled() {
+		if res.action == doYield && co.flag&(flagCanceled|flagNonCancelable) == flagCanceled {
 			res = co.cancel()
 		}
 
 		if res.action != doYield && res.action != doTransition {
+			co.flag &^= flagResumed
+			co.flag |= flagCleanup
+
 			co.clearDeps()
 			co.clearCleanups()
+
+			if co.childnum != 0 {
+				co.task = actionToTask(res.action)
+				return true
+			}
+
+			co.flag &^= flagResumed | flagCleanup
+
 			if co.Panicking() {
 				res = co.raise()
 			}
+
 			controllers := co.controllers
 			for len(controllers) != 0 {
 				i := len(controllers) - 1
@@ -221,12 +244,14 @@ func (co *Coroutine) run() (yielded bool) {
 					break
 				}
 			}
+
 			if res.action != doTransition && res.action != doTailTransition {
 				rootController := &controller{kind: funcController}
 				if !ps.Try(func() { res = rootController.negotiate(co, res) }) {
 					res = rootController.negotiate(co, co.panic())
 				}
 			}
+
 			if res.action == doTailTransition {
 				res.action = doTransition
 			}
@@ -240,10 +265,6 @@ func (co *Coroutine) run() (yielded bool) {
 			guard = res.guard
 			co.guard = guard
 			continue // For calling guard immediately.
-		}
-
-		if res.action != doTransition {
-			break
 		}
 
 		if res.controller.kind != 0 {
@@ -270,6 +291,10 @@ func (co *Coroutine) run() (yielded bool) {
 				}
 			}
 		}
+
+		if res.action != doTransition {
+			break
+		}
 	}
 
 	if res.action == doYield {
@@ -278,15 +303,22 @@ func (co *Coroutine) run() (yielded bool) {
 
 	co.flag |= flagEnded
 
-	co.clearDeps()
-	co.clearCleanups()
-	co.removeFromParent()
+	parent := co.parent
+	if parent != nil {
+		if i := slices.Index(parent.cleanups, Cleanup((*childCoroutineCleanup)(co))); i != -1 {
+			parent.cleanups = slices.Delete(parent.cleanups, i, i+1)
+		}
+		parent.childnum--
+		if parent.childnum == 0 && parent.flag&flagCleanup != 0 {
+			parent.Resume()
+		}
+	}
 
 	if co.Panicking() {
-		if parent := co.parent; parent != nil {
+		if parent != nil {
 			parent.flag |= flagPanicking
 			parent.guard = nil
-			parent.task = (*Coroutine).panic
+			parent.task = (*Coroutine).raise
 			parent.ps = append(parent.ps, co.ps...)
 			parent.Resume()
 		} else {
@@ -294,12 +326,20 @@ func (co *Coroutine) run() (yielded bool) {
 		}
 	}
 
-	if len(co.defers) != 0 {
-		panic("async: internal error: not all deferred tasks are handled")
+	if len(co.deps) != 0 {
+		panic("async: internal error: deps did not clear")
 	}
-
+	if len(co.cleanups) != 0 {
+		panic("async: internal error: cleanups did not clear")
+	}
+	if co.childnum != 0 {
+		panic("async: internal error: child coroutines did not clear")
+	}
+	if len(co.defers) != 0 {
+		panic("async: internal error: defers did not clear")
+	}
 	if len(co.controllers) != 0 {
-		panic("async: internal error: not all controllers are handled")
+		panic("async: internal error: controllers did not clear")
 	}
 
 	if co.flag&flagEnqueued == 0 {
@@ -331,20 +371,7 @@ func (co *Coroutine) clearCleanups() {
 	co.cleanups = cleanups[:0]
 	if !ok {
 		co.flag |= flagPanicking
-		co.task = (*Coroutine).panic
-	}
-}
-
-func (co *Coroutine) removeFromParent() {
-	parent := co.parent
-	if parent == nil {
-		return
-	}
-	for i, c := range parent.cleanups {
-		if c == (*childCoroutineCleanup)(co) {
-			parent.cleanups = slices.Delete(parent.cleanups, i, i+1)
-			break
-		}
+		co.task = (*Coroutine).raise
 	}
 }
 
@@ -352,11 +379,12 @@ type childCoroutineCleanup Coroutine
 
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
-	co.flag |= flagExiting | flagCanceled
-	co.guard = nil
-	co.task = (*Coroutine).raise
-	if yielded := co.run(); yielded {
-		panic("async: internal error: child coroutine did not end")
+	co.flag |= flagCanceled
+	if !co.NonCancelable() {
+		co.flag |= flagExiting
+		co.guard = nil
+		co.task = (*Coroutine).raise
+		co.run()
 	}
 }
 
@@ -406,6 +434,11 @@ func (co *Coroutine) Canceled() bool {
 	return co.flag&flagCanceled != 0
 }
 
+// NonCancelable reports whether co is currently running a [NonCancelable] task.
+func (co *Coroutine) NonCancelable() bool {
+	return co.flag&flagNonCancelable != 0
+}
+
 // Escape marks co as an escaped coroutine, preventing co from being put into
 // pool for recycling.
 // Useful when one wants to access co from another goroutine.
@@ -429,14 +462,20 @@ func (co *Coroutine) Unescape() {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	if co.flag&(flagEnded|flagCanceled) != 0 {
+	switch flag := co.flag; {
+	case flag&(flagEnded|flagCleanup) != 0:
+		return
+	case flag&(flagCanceled|flagNonCancelable) == flagCanceled:
 		return
 	}
+	var deps map[Event]struct{}
 	for _, d := range ev {
-		deps := co.deps
 		if deps == nil {
-			deps = make(map[Event]struct{})
-			co.deps = deps
+			deps = co.deps
+			if deps == nil {
+				deps = make(map[Event]struct{})
+				co.deps = deps
+			}
 		}
 		deps[d] = struct{}{}
 		d.addListener(co)
@@ -514,7 +553,10 @@ func (co *Coroutine) Recover() (v any) {
 
 // Recover2 is like [Coroutine.Recover] but also returns the stack trace.
 func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
-	if !co.Panicking() {
+	switch flag := co.flag; {
+	case flag&flagCleanup != 0:
+		panic("async: recover during cleanup")
+	case flag&flagPanicking == 0:
 		return nil, nil
 	}
 	p := &co.ps[len(co.ps)-1]
@@ -525,13 +567,18 @@ func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
 
 // Spawn creates a child coroutine with the same weight as co to work on t.
 //
-// Spawn runs t immediately. If t panics immediately, Spawn panics too.
+// Spawn runs t immediately. If t panics immediately, Spawn panics, too.
 //
 // Child coroutines, if not yet ended, are canceled when the parent one resumes
 // or ends or exits, or when the parent one is making a transition to work on
 // another [Task].
 // When a coroutine is canceled, it runs to completion with all yield points
 // treated like exit points.
+//
+// However, within a [NonCancelable] context, a canceled coroutine is allowed
+// to yield, which correspondingly causes its parent coroutine to yield, too.
+// In such case, the parent coroutine stays suspended until all its child
+// coroutines complete.
 func (co *Coroutine) Spawn(t Task) {
 	if co.Ended() {
 		panic("async: coroutine has already ended")
@@ -544,9 +591,10 @@ func (co *Coroutine) Spawn(t Task) {
 
 	child := co.executor.newCoroutine().init(co.executor, t).withLevel(level).withWeight(co.weight)
 	child.parent = co
+	co.childnum++
 
-	switch yielded := child.run(); {
-	case yielded:
+	switch suspended := child.run(); {
+	case suspended:
 		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))
 	case co.Panicking():
 		// child panics.
@@ -640,7 +688,7 @@ func (pr PendingResult) Throw(v any) Result {
 }
 
 // Until transforms pr into one with a condition.
-// Affected coroutines remain yielded until the condition is met.
+// Affected coroutines remain suspended until the condition is met.
 func (pr PendingResult) Until(f func() bool) PendingResult {
 	pr.res.guard = f
 	return pr
@@ -732,6 +780,7 @@ const (
 	blockController
 	loopController
 	seqController
+	ncController
 )
 
 type controller struct {
@@ -771,7 +820,7 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				co.flag |= flagPanicking
 			}
 			if raise {
-				return Result{action: doRaise}
+				return co.raise()
 			}
 			return co.End()
 		case doBreak:
@@ -814,6 +863,9 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				return co.Transition(t)
 			}
 		}
+		return res
+	case ncController:
+		co.flag &^= flagNonCancelable
 		return res
 	default:
 		panic("async: internal error: unknown controller")
@@ -997,13 +1049,6 @@ func Func(t Task) Task {
 	}
 }
 
-func must(t Task) Task {
-	if t == nil {
-		panic("async: nil Task")
-	}
-	return t
-}
-
 // FromSeq returns a [Task] that runs each of the tasks from seq in sequence.
 //
 // Caveat: requires spawning a goroutine (which is stackful) when running
@@ -1018,6 +1063,43 @@ func FromSeq(seq iter.Seq[Task]) Task {
 			controller: controller{kind: seqController, next: next, stop: stop},
 		}
 	}
+}
+
+// NonCancelable returns a [Task] that runs t in a non-cancelable context,
+// preventing it from being canceled by a parent coroutine.
+func NonCancelable(t Task) Task {
+	return func(co *Coroutine) Result {
+		res := co.Transition(t)
+		if !co.NonCancelable() {
+			co.flag |= flagNonCancelable
+			res.controller.kind = ncController
+		}
+		return res
+	}
+}
+
+func actionToTask(action action) Task {
+	switch action {
+	case doEnd:
+		return End()
+	case doBreak:
+		return Break()
+	case doContinue:
+		return Continue()
+	case doReturn:
+		return Return()
+	case doRaise:
+		return (*Coroutine).raise
+	default:
+		panic("async: internal error: unexpected action")
+	}
+}
+
+func must(t Task) Task {
+	if t == nil {
+		panic("async: nil Task")
+	}
+	return t
 }
 
 func resumeParent(co *Coroutine) Result {

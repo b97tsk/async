@@ -715,6 +715,100 @@ func ExampleFromSeq() {
 	// 9
 }
 
+func ExampleNonCancelable() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var sig1, sig2 async.Signal
+
+	{
+		fmt.Println("without NonCancelable:")
+
+		myExecutor.Spawn(async.Block(
+			async.Select(
+				async.Await(&sig1), // When sig1 notifies, cancel the following task.
+				async.Block(
+					async.Defer(async.Block(
+						async.Await(&sig2), // Without NonCancelable, canceled coroutines cannot yield.
+						async.Do(func() { fmt.Println("after Await") }),
+					)),
+					async.Await(), // Awaits for cancellation.
+				),
+			),
+			async.Do(func() { fmt.Println("after Select") }),
+		))
+
+		myExecutor.Spawn(async.Do(sig1.Notify))
+		myExecutor.Spawn(async.Do(sig2.Notify))
+	}
+
+	{
+		fmt.Println("with NonCancelable:")
+
+		myExecutor.Spawn(async.Block(
+			async.Select(
+				async.Await(&sig1), // When sig1 notifies, cancel the following task.
+				async.Block(
+					async.Defer(async.Block(
+						// With NonCancelable, even canceled coroutines can yield, too.
+						async.NonCancelable(async.Await(&sig2)),
+						async.Do(func() { fmt.Println("after Await") }),
+					)),
+					async.Await(), // Awaits for cancellation.
+				),
+			),
+			async.Do(func() { fmt.Println("after Select") }),
+		))
+
+		myExecutor.Spawn(async.Do(sig1.Notify))
+		myExecutor.Spawn(async.Do(sig2.Notify))
+	}
+
+	{
+		fmt.Println("additional tests:")
+
+		for i := range 5 {
+			myExecutor.Spawn(async.Block(
+				async.Defer(async.Do(func() { fmt.Println(i) })),
+				async.LoopN(1, func(co *async.Coroutine) async.Result {
+					co.Spawn(async.NonCancelable(async.Await(&sig1)))
+					switch i {
+					case 0:
+						return co.End()
+					case 1:
+						return co.Break()
+					case 2:
+						return co.Continue()
+					case 3:
+						return co.Return()
+					default:
+						return co.Exit()
+					}
+				}),
+				async.Do(func() { fmt.Println("after LoopN") }),
+			))
+			myExecutor.Spawn(async.Do(sig1.Notify))
+		}
+	}
+
+	// Output:
+	// without NonCancelable:
+	// after Select
+	// with NonCancelable:
+	// after Await
+	// after Select
+	// additional tests:
+	// after LoopN
+	// 0
+	// after LoopN
+	// 1
+	// after LoopN
+	// 2
+	// 3
+	// 4
+}
+
 func ExampleJoin() {
 	var wg sync.WaitGroup // For keeping track of goroutines.
 
@@ -1027,10 +1121,6 @@ func Example_panicAndRecover() {
 				))
 				co.Spawn(async.Block(
 					async.Defer(async.Do(func() { fmt.Println("canceled") })),
-					async.Defer(async.Block(
-						async.Await(),                   // Canceled coroutines cannot yield.
-						async.Do(func() { panic("B") }), // Didn't run.
-					)),
 					async.Await(), // This child coroutine never ends, but it can be canceled.
 				))
 				return co.Await().End()
