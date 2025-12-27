@@ -23,7 +23,7 @@ func ExampleSemaphore() {
 
 	mySemaphore := async.NewSemaphore(12)
 
-	for n := int64(1); n <= 8; n++ {
+	for n := async.Weight(1); n <= 8; n++ {
 		myExecutor.Spawn(mySemaphore.Acquire(n).Then(async.Do(func() {
 			fmt.Println(n)
 			wg.Add(1)
@@ -66,7 +66,7 @@ func ExampleSemaphore_cancel() {
 	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
 		// Four Acquire calls, only two of them can succeed;
 		// the other two get canceled later when co ends.
-		for n := int64(1); n <= 4; n++ {
+		for n := async.Weight(1); n <= 4; n++ {
 			co.Spawn(mySemaphore.Acquire(n).Then(async.Do(func() {
 				fmt.Println(n)
 			})))

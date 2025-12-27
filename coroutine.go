@@ -65,8 +65,7 @@ type Coroutine struct {
 	controllers []controller
 }
 
-// Weight is the type of weight for use when spawning a weighted coroutine.
-type Weight int
+type Weight int64
 
 func (e *Executor) newCoroutine() *Coroutine {
 	if co := e.coroutinePool().Get(); co != nil {
