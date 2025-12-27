@@ -31,19 +31,36 @@ func (s *Semaphore) Acquire(n Weight) Task {
 		panic("async(Semaphore): negative weight")
 	}
 	return func(co *Coroutine) Result {
-		if s.size-s.cur < n || len(s.waiters) != 0 {
-			if n > s.size {
-				return co.Yield() // Impossible to success.
-			}
-			w := waiterPool.Get().(*waiter)
-			w.co, w.s, w.n = co, s, n
-			s.waiters = append(s.waiters, w)
-			co.Cleanup(w)
-			return co.Await().End()
+		if s.size-s.cur >= n && len(s.waiters) == 0 {
+			s.cur += n
+			return co.End()
 		}
-		s.cur += n
-		return co.End()
+		if n > s.size {
+			return co.Yield() // Impossible to success.
+		}
+		w := waiterPool.Get().(*waiter)
+		w.co, w.s, w.n = co, s, n
+		s.waiters = append(s.waiters, w)
+		co.Cleanup(w)
+		return co.Await().End()
 	}
+}
+
+// TryAcquire acquires the semaphore with a weight of n without blocking.
+// On success, returns true.
+// On failure, returns false and leaves the semaphore unchanged.
+//
+// Without proper synchronization, one should only call this method in a [Task]
+// function.
+func (s *Semaphore) TryAcquire(n Weight) bool {
+	if n < 0 {
+		panic("async(Semaphore): negative weight")
+	}
+	success := s.size-s.cur >= n && len(s.waiters) == 0
+	if success {
+		s.cur += n
+	}
+	return success
 }
 
 // Release releases the semaphore with a weight of n.
@@ -86,21 +103,20 @@ type waiter struct {
 func (w *waiter) Cleanup() {
 	switch {
 	case !w.acquired:
-		w.s.removeWaiter(w)
+		s := w.s
+		if i := slices.Index(s.waiters, w); i != -1 {
+			s.waiters = slices.Delete(s.waiters, i, i+1)
+			if i == 0 && s.size > s.cur {
+				s.notifyWaiters()
+			}
+		}
 	case w.co.Exiting():
-		defer w.s.Release(w.n)
+		s, n := w.s, w.n
+		s.cur -= n
+		s.notifyWaiters()
 	}
 	*w = waiter{}
 	waiterPool.Put(w)
-}
-
-func (s *Semaphore) removeWaiter(w *waiter) {
-	if i := slices.Index(s.waiters, w); i != -1 {
-		s.waiters = slices.Delete(s.waiters, i, i+1)
-		if i == 0 && s.size > s.cur {
-			s.notifyWaiters()
-		}
-	}
 }
 
 var waiterPool = sync.Pool{

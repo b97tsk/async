@@ -6,8 +6,8 @@ import (
 	"github.com/b97tsk/async"
 )
 
-func TestBugs(t *testing.T) {
-	t.Run("Semaphore-1", func(t *testing.T) {
+func TestSemaphore(t *testing.T) {
+	t.Run("Bug-1", func(t *testing.T) {
 		var myExecutor async.Executor
 
 		myExecutor.Autorun(myExecutor.Run)
@@ -22,18 +22,11 @@ func TestBugs(t *testing.T) {
 			async.Do(func() { sema.Release(1) }),
 		))
 
-		var acquired bool
-
-		myExecutor.Spawn(async.Block(
-			sema.Acquire(1),
-			async.Do(func() { acquired = true }),
-		))
-
-		if !acquired {
-			t.Error("Acquire did not succeed when there are no waiters.")
+		if !sema.TryAcquire(1) {
+			t.Fatal("TryAcquire did not succeed when there are no waiters.")
 		}
 	})
-	t.Run("Semaphore-2", func(t *testing.T) {
+	t.Run("Bug-2", func(t *testing.T) {
 		var myExecutor async.Executor
 
 		myExecutor.Autorun(myExecutor.Run)
@@ -50,21 +43,14 @@ func TestBugs(t *testing.T) {
 			),
 		))
 
-		var acquired bool
-
-		myExecutor.Spawn(async.Block(
-			sema.Acquire(1),
-			async.Do(func() { acquired = true }),
-		))
-
-		if acquired {
-			t.Error("Acquire should not succeed when there are waiters.")
+		if sema.TryAcquire(1) {
+			t.Fatal("TryAcquire should not succeed when there are waiters.")
 		}
 
 		myExecutor.Spawn(async.Do(sig.Notify))
 
-		if !acquired {
-			t.Error("Acquire did not succeed when there are no waiters.")
+		if !sema.TryAcquire(1) {
+			t.Fatal("TryAcquire did not succeed when there are no waiters.")
 		}
 	})
 }
