@@ -1,9 +1,6 @@
 package async
 
-import (
-	"sync"
-	"sync/atomic"
-)
+import "sync"
 
 // An Executor is a coroutine spawner, and a coroutine runner.
 //
@@ -34,17 +31,7 @@ type Executor struct {
 	ps      panicstack
 	running bool
 	autorun func()
-	pool    atomic.Pointer[sync.Pool]
 }
-
-func (e *Executor) coroutinePool() *sync.Pool {
-	if p := e.pool.Load(); p != nil {
-		return p
-	}
-	return &coroutinePool
-}
-
-var coroutinePool sync.Pool
 
 // Autorun sets up an autorun function to calling the Run method automatically
 // whenever a coroutine is spawned or resumed.
@@ -57,12 +44,6 @@ func (e *Executor) Autorun(f func()) {
 	e.mu.Lock()
 	e.autorun = f
 	e.mu.Unlock()
-}
-
-// UsePool tells e to use p, rather than the built-in shared one, to cache
-// unused coroutine objects for later reuse.
-func (e *Executor) UsePool(p *sync.Pool) {
-	e.pool.Store(p)
 }
 
 // Run pops and runs every coroutine in the queue until the queue is emptied.
@@ -105,7 +86,7 @@ func (e *Executor) Spawn(t Task) {
 func (e *Executor) SpawnWeighted(w Weight, t Task) {
 	var autorun func()
 
-	co := e.newCoroutine().init(e, t).withWeight(w)
+	co := newCoroutine().init(e, t).withWeight(w)
 
 	e.mu.Lock()
 

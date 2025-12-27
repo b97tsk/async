@@ -3,6 +3,7 @@ package async
 import (
 	"iter"
 	"slices"
+	"sync"
 )
 
 type action int
@@ -67,14 +68,15 @@ type Coroutine struct {
 
 type Weight int64
 
-func (e *Executor) newCoroutine() *Coroutine {
-	if co := e.coroutinePool().Get(); co != nil {
-		return co.(*Coroutine)
-	}
-	return new(Coroutine)
+var coroutinePool = sync.Pool{
+	New: func() any { return new(Coroutine) },
 }
 
-func (e *Executor) freeCoroutine(co *Coroutine) {
+func newCoroutine() *Coroutine {
+	return coroutinePool.Get().(*Coroutine)
+}
+
+func freeCoroutine(co *Coroutine) {
 	if co.flag&flagNonRecyclable != 0 {
 		return
 	}
@@ -84,7 +86,7 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 	clear(co.ps)
 	co.ps = co.ps[:0]
 	co.task = nil
-	e.coroutinePool().Put(co)
+	coroutinePool.Put(co)
 }
 
 func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
@@ -152,7 +154,7 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 	co.flag = flag
 	switch {
 	case flag&flagEnded != 0:
-		e.freeCoroutine(co)
+		freeCoroutine(co)
 	case flag&flagResumed != 0:
 		e.mu.Unlock()
 		co.run()
@@ -342,7 +344,7 @@ func (co *Coroutine) run() (suspended bool) {
 	}
 
 	if co.flag&flagEnqueued == 0 {
-		co.executor.freeCoroutine(co)
+		freeCoroutine(co)
 	}
 
 	return false
@@ -567,7 +569,7 @@ func (co *Coroutine) Spawn(t Task) {
 		panic("async: too many levels")
 	}
 
-	child := co.executor.newCoroutine().init(co.executor, t).withLevel(level).withWeight(co.weight)
+	child := newCoroutine().init(co.executor, t).withLevel(level).withWeight(co.weight)
 	child.parent = co
 	co.childnum++
 
