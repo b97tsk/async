@@ -30,9 +30,9 @@
 //
 // An async [Task] is spawned with a [Coroutine] to take care of it.
 // In this user-provided function, one can return a specific [Result] to tell
-// a coroutine to watch and await some events (e.g. [Signal], [State] and
-// [Memo], etc.), and the coroutine can just re-run the task whenever any of
-// these events notifies.
+// a coroutine to watch and await some events (e.g. [Signal], [State], etc.),
+// and the coroutine can just re-run the task whenever any of these events
+// notifies.
 //
 // This is useful when one wants to do something repeatedly.
 // It works like a loop. To exit this loop, just return a Result that does

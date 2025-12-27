@@ -2,7 +2,7 @@ package async
 
 // Event is the interface of any type that can be watched by a coroutine.
 //
-// The following types implement Event: [Signal], [State] and [Memo].
+// The following types implement Event: [Signal] and [State].
 // Any type that embeds [Signal] also implements Event, e.g. [State].
 type Event interface {
 	addListener(co *Coroutine)

@@ -105,7 +105,7 @@ func (e *Executor) Spawn(t Task) {
 func (e *Executor) SpawnWeighted(w Weight, t Task) {
 	var autorun func()
 
-	co := e.newCoroutine().init(e, t).recyclable().withWeight(w)
+	co := e.newCoroutine().init(e, t).withWeight(w)
 
 	e.mu.Lock()
 

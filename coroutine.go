@@ -42,8 +42,7 @@ const (
 // so that it could resume later.
 //
 // In order for a coroutine to resume, the coroutine must watch at least one
-// [Event] (e.g. [Signal], [State] and [Memo], etc.), when calling the task
-// function.
+// [Event] (e.g. [Signal], [State], etc.), when calling the task function.
 // A notification of such an event resumes the coroutine.
 // When a coroutine is resumed, the executor runs the coroutine again.
 //
@@ -87,16 +86,11 @@ func (e *Executor) freeCoroutine(co *Coroutine) {
 }
 
 func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
-	co.flag = flagResumed
+	co.flag = flagResumed | flagRecyclable
 	co.level = 0
 	co.weight = 0
 	co.executor = e
 	co.task = t
-	return co
-}
-
-func (co *Coroutine) recyclable() *Coroutine {
-	co.flag |= flagRecyclable
 	return co
 }
 
@@ -192,7 +186,7 @@ func (co *Coroutine) run() (yielded bool) {
 		co.clearDeps()
 		co.clearCleanups()
 
-		co.flag &^= flagResumed | flagEnded // Clear flagEnded for Memo.
+		co.flag &^= flagResumed
 
 		if !ps.Try(func() { res = co.task(co) }) {
 			res = co.panic()
@@ -548,7 +542,7 @@ func (co *Coroutine) Spawn(t Task) {
 		panic("async: too many levels")
 	}
 
-	child := co.executor.newCoroutine().init(co.executor, t).recyclable().withLevel(level).withWeight(co.weight)
+	child := co.executor.newCoroutine().init(co.executor, t).withLevel(level).withWeight(co.weight)
 	child.parent = co
 
 	switch yielded := child.run(); {

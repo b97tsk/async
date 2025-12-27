@@ -94,97 +94,6 @@ func Example() {
 	// s1 + s2 = 15
 }
 
-// This example demonstrates how to use memos to memoize cheap computations.
-// Memos are evaluated lazily. They take effect only when they are acquired.
-func Example_memo() {
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(myExecutor.Run)
-
-	s1, s2 := async.NewState(1), async.NewState(2)
-
-	const memoWeight = 999 // Memos usually run before other tasks.
-
-	sum := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
-		co.Watch(s1, s2)
-		if v := s1.Get() + s2.Get(); v != s.Get() {
-			s.Set(v) // Update s only when its value changes to stop unnecessary propagation.
-		}
-	})
-
-	product := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
-		co.Watch(s1, s2)
-		if v := s1.Get() * s2.Get(); v != s.Get() {
-			s.Set(v)
-		}
-	})
-
-	op := async.NewState('+')
-
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		co.Watch(op)
-
-		fmt.Println("op =", "'"+string(op.Get())+"'")
-
-		switch op.Get() {
-		case '+':
-			co.Spawn(func(co *async.Coroutine) async.Result {
-				fmt.Println("s1 + s2 =", sum.Get())
-				return co.Yield(sum)
-			})
-		case '*':
-			co.Spawn(func(co *async.Coroutine) async.Result {
-				fmt.Println("s1 * s2 =", product.Get())
-				return co.Yield(product)
-			})
-		}
-
-		return co.Yield()
-	})
-
-	fmt.Println("--- SEPARATOR ---")
-
-	myExecutor.Spawn(async.Do(func() {
-		s1.Set(3)
-		s2.Set(4)
-	}))
-
-	fmt.Println("--- SEPARATOR ---")
-
-	myExecutor.Spawn(async.Do(func() {
-		op.Set('*')
-	}))
-
-	fmt.Println("--- SEPARATOR ---")
-
-	myExecutor.Spawn(async.Do(func() {
-		s1.Set(5)
-		s2.Set(6)
-	}))
-
-	fmt.Println("--- SEPARATOR ---")
-
-	myExecutor.Spawn(async.Do(func() {
-		s1.Set(7)
-		s2.Set(8)
-		op.Set('+')
-	}))
-
-	// Output:
-	// op = '+'
-	// s1 + s2 = 3
-	// --- SEPARATOR ---
-	// s1 + s2 = 7
-	// --- SEPARATOR ---
-	// op = '*'
-	// s1 * s2 = 12
-	// --- SEPARATOR ---
-	// s1 * s2 = 30
-	// --- SEPARATOR ---
-	// op = '+'
-	// s1 + s2 = 15
-}
-
 // This example demonstrates how to set up an autorun function to run
 // an executor in a goroutine automatically whenever a coroutine is spawned or
 // resumed.
@@ -196,23 +105,6 @@ func Example_nonBlocking() {
 	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	s1, s2 := async.NewState(1), async.NewState(2)
-
-	const memoWeight = 999 // Memos usually run before other tasks.
-
-	sum := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
-		co.Watch(s1, s2)
-		if v := s1.Get() + s2.Get(); v != s.Get() {
-			s.Set(v)
-		}
-	})
-
-	product := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
-		co.Watch(s1, s2)
-		if v := s1.Get() * s2.Get(); v != s.Get() {
-			s.Set(v)
-		}
-	})
-
 	op := async.NewState('+')
 
 	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
@@ -223,13 +115,13 @@ func Example_nonBlocking() {
 		switch op.Get() {
 		case '+':
 			co.Spawn(func(co *async.Coroutine) async.Result {
-				fmt.Println("s1 + s2 =", sum.Get())
-				return co.Yield(sum)
+				fmt.Println("s1 + s2 =", s1.Get()+s2.Get())
+				return co.Yield(s1, s2)
 			})
 		case '*':
 			co.Spawn(func(co *async.Coroutine) async.Result {
-				fmt.Println("s1 * s2 =", product.Get())
-				return co.Yield(product)
+				fmt.Println("s1 * s2 =", s1.Get()*s2.Get())
+				return co.Yield(s1, s2)
 			})
 		}
 
@@ -303,49 +195,6 @@ func Example_conditional() {
 		}
 
 		fmt.Println(v)
-		return co.Yield()
-	})
-
-	inc := func(i int) int { return i + 1 }
-
-	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
-	myExecutor.Spawn(async.Do(func() { s1.Update(inc) }))
-	myExecutor.Spawn(async.Do(func() { s3.Notify() }))
-	myExecutor.Spawn(async.Do(func() { s2.Update(inc) }))
-	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
-
-	// Output:
-	// 3
-	// 28
-	// 28
-	// 5
-}
-
-// This example demonstrates how a memo can conditionally depend on a state.
-func Example_conditionalMemo() {
-	var myExecutor async.Executor
-
-	myExecutor.Autorun(myExecutor.Run)
-
-	s1, s2, s3 := async.NewState(1), async.NewState(2), async.NewState(7)
-
-	const memoWeight = 999 // Memos usually run before other tasks.
-
-	m := async.NewMemo(&myExecutor, memoWeight, func(co *async.Coroutine, s *async.State[int]) {
-		co.Watch(s1, s2) // Always depends on s1 and s2.
-
-		v := s1.Get() + s2.Get()
-		if v%2 == 0 {
-			co.Watch(s3) // Conditionally depends on s3.
-			v *= s3.Get()
-		}
-
-		s.Set(v)
-	})
-
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		co.Watch(m)
-		fmt.Println(m.Get())
 		return co.Yield()
 	})
 
