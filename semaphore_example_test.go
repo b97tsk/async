@@ -13,25 +13,17 @@ func ExampleSemaphore() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	mySemaphore := async.NewSemaphore(12)
 
 	for n := async.Weight(1); n <= 8; n++ {
 		myExecutor.Spawn(mySemaphore.Acquire(n).Then(async.Do(func() {
 			fmt.Println(n)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				time.Sleep(100 * time.Millisecond)
 				myExecutor.Spawn(async.Do(func() { mySemaphore.Release(n) }))
-			}()
+			})
 		})))
 	}
 
@@ -53,13 +45,7 @@ func ExampleSemaphore_cancel() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	mySemaphore := async.NewSemaphore(3)
 
@@ -74,12 +60,10 @@ func ExampleSemaphore_cancel() {
 
 		var sig async.Signal
 
-		wg.Add(1)
-		go func(outer *async.Coroutine) {
-			defer wg.Done()
+		wg.Go(func() {
 			time.Sleep(100 * time.Millisecond)
 			myExecutor.Spawn(async.Do(sig.Notify))
-		}(co)
+		})
 
 		return co.Await(&sig).End()
 	})

@@ -13,13 +13,7 @@ func ExampleWaitGroup() {
 
 	var myExecutor async.Executor
 
-	myExecutor.Autorun(func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			myExecutor.Run()
-		}()
-	})
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
 	var myState struct {
 		wg     async.WaitGroup
@@ -28,27 +22,23 @@ func ExampleWaitGroup() {
 
 	myState.wg.Add(2) // Note that async.WaitGroup is not safe for concurrent use.
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		time.Sleep(500 * time.Millisecond) // Heavy work #1 here.
 		ans := 15
 		myExecutor.Spawn(async.Do(func() {
 			myState.v1 = ans
 			myState.wg.Done()
 		}))
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		time.Sleep(500 * time.Millisecond) // Heavy work #2 here.
 		ans := 27
 		myExecutor.Spawn(async.Do(func() {
 			myState.v2 = ans
 			myState.wg.Done()
 		}))
-	}()
+	})
 
 	myExecutor.Spawn(myState.wg.Await().Then(async.Do(func() {
 		fmt.Println("v1 + v2 =", myState.v1+myState.v2)
