@@ -1198,12 +1198,12 @@ func Example_panicAndRecover() {
 		async.Block(
 			async.Defer(recover),
 			async.Defer(recoverB),
-			async.Throw("A"), // Throw is like panic but leaves no stack trace behind.
+			async.Panic("A"), // async.Panic is like built-in panic but leaves no stack trace behind.
 		),
 		async.Block(
 			async.Defer(recover),
 			async.Defer(recoverB),
-			async.Throw("B"),
+			async.Panic("B"),
 		),
 	))
 

@@ -515,7 +515,7 @@ func (co *Coroutine) Defer(t Task) {
 // trace returned by [runtime/debug.Stack], which might take thousands of bytes.
 //
 // Instead of using the built-in panic function to trigger a panic, one could
-// consider use [Coroutine.Throw] to mimic one, which leaves no stack trace
+// consider use [Coroutine.Panic] to mimic one, which leaves no stack trace
 // behind.
 func (co *Coroutine) Recover() (v any) {
 	switch flag := co.flag; {
@@ -596,7 +596,7 @@ func (co *Coroutine) Spawn(t Task) {
 //   - [Coroutine.Continue]: for continuing a [Loop] (or [LoopN]);
 //   - [Coroutine.Return]: for returning from a [Func];
 //   - [Coroutine.Exit]: for exiting a coroutine;
-//   - [Coroutine.Throw]: for simulating a panic.
+//   - [Coroutine.Panic]: for simulating a panic.
 //
 // These methods may have side effects. One should never store a Result in
 // a variable and overwrite it with another, before returning it. Instead,
@@ -658,12 +658,12 @@ func (pr PendingResult) Exit() Result {
 	return pr.Then(Exit())
 }
 
-// Throw returns a [Result] that will cause the running coroutine to yield and,
+// Panic returns a [Result] that will cause the running coroutine to yield and,
 // when resumed, cause the running coroutine to behave like there's a panic.
-// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
-func (pr PendingResult) Throw(v any) Result {
-	return pr.Then(Throw(v))
+func (pr PendingResult) Panic(v any) Result {
+	return pr.Then(Panic(v))
 }
 
 // Until transforms pr into one with a condition.
@@ -738,12 +738,12 @@ func (co *Coroutine) raise() Result {
 	return Result{action: doRaise}
 }
 
-// Throw returns a [Result] that will cause co to behave like there's a panic.
-// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Panic returns a [Result] that will cause co to behave like there's a panic.
+// Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
-func (co *Coroutine) Throw(v any) Result {
+func (co *Coroutine) Panic(v any) Result {
 	if v == nil {
-		panic("async: Throw called with nil argument")
+		panic("async: Panic called with nil argument")
 	}
 	co.ps.push(v, nil)
 	co.flag |= flagPanicking
@@ -998,13 +998,13 @@ func Exit() Task {
 	return (*Coroutine).Exit
 }
 
-// Throw returns a [Task] that causes the coroutine that runs it to behave
+// Panic returns a [Task] that causes the coroutine that runs it to behave
 // like there's a panic.
-// Unlike the built-in panic function, Throw leaves no stack trace behind.
+// Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
-func Throw(v any) Task {
+func Panic(v any) Task {
 	return func(co *Coroutine) Result {
-		return co.Throw(v)
+		return co.Panic(v)
 	}
 }
 
