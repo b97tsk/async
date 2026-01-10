@@ -518,22 +518,16 @@ func (co *Coroutine) Defer(t Task) {
 // consider use [Coroutine.Throw] to mimic one, which leaves no stack trace
 // behind.
 func (co *Coroutine) Recover() (v any) {
-	v, _ = co.Recover2()
-	return v
-}
-
-// Recover2 is like [Coroutine.Recover] but also returns the stack trace.
-func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
 	switch flag := co.flag; {
 	case flag&flagCleanup != 0:
 		panic("async: recover during cleanup")
 	case flag&flagPanicking == 0:
-		return nil, nil
+		return nil
 	}
 	p := &co.ps[len(co.ps)-1]
 	p.recovered = true
 	co.flag &^= flagPanicking
-	return p.value, p.stack
+	return p.value
 }
 
 // Spawn creates a child coroutine with the same weight as co to work on t.
