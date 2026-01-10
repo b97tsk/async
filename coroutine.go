@@ -530,6 +530,24 @@ func (co *Coroutine) Recover() (v any) {
 	return p.value
 }
 
+// RecoverFunc is like [Coroutine.Recover] but only recovers the recent panic
+// that satisfies a condition.
+func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
+	switch flag := co.flag; {
+	case flag&flagCleanup != 0:
+		panic("async: recover during cleanup")
+	case flag&flagPanicking == 0:
+		return nil
+	}
+	p := &co.ps[len(co.ps)-1]
+	if f(p.value) {
+		p.recovered = true
+		co.flag &^= flagPanicking
+		v = p.value
+	}
+	return v
+}
+
 // Spawn creates a child coroutine with the same weight as co to work on t.
 //
 // Spawn runs t immediately. If t panics immediately, Spawn panics, too.

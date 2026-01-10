@@ -1070,9 +1070,7 @@ func Example_panicAndRecover() {
 	}
 
 	recover := func(co *async.Coroutine) async.Result {
-		if v := co.Recover(); v != nil {
-			fmt.Println(v)
-		}
+		fmt.Println(co.Recover())
 		return co.End()
 	}
 
@@ -1186,9 +1184,26 @@ func Example_panicAndRecover() {
 			async.Defer(recover),
 			async.Continue(), // Continue without a loop.
 		),
+	))
+
+	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
+
+	recoverB := func(co *async.Coroutine) async.Result {
+		fmt.Println(co.RecoverFunc(func(v any) bool { return v == "B" }))
+		return co.End()
+	}
+
+	myExecutor.Spawn(async.Join(
 		async.Block(
 			async.Defer(recover),
+			async.Defer(recoverB),
 			async.Throw("A"), // Throw is like panic but leaves no stack trace behind.
+		),
+		async.Block(
+			async.Defer(recover),
+			async.Defer(recoverB),
+			async.Throw("B"),
 		),
 	))
 
@@ -1221,7 +1236,11 @@ func Example_panicAndRecover() {
 	// --- SEPARATOR ---
 	// async: unhandled break action
 	// async: unhandled continue action
+	// --- SEPARATOR ---
+	// <nil>
 	// A
+	// B
+	// <nil>
 	// --- SEPARATOR ---
 	// dummy error recovered!
 }
