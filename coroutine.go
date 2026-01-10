@@ -41,7 +41,7 @@ func (*noCopy) Unlock() {}
 // and stackless.
 //
 // A coroutine is created with a function called [Task].
-// A coroutine's job is to end the task.
+// A coroutine's job is to complete the task.
 // When an [Executor] spawns a coroutine with a task, it runs the coroutine by
 // calling the task function with the coroutine as the argument.
 // The return value determines whether to end the coroutine or to yield it
@@ -400,6 +400,10 @@ func (co *Coroutine) Weight() Weight {
 }
 
 // Parent returns the parent coroutine of co.
+//
+// Note that a coroutine must not escape to a non-child coroutine or another
+// goroutine because, a coroutine may be put into pool for later reuse when
+// it completes.
 func (co *Coroutine) Parent() *Coroutine {
 	return co.parent
 }
@@ -464,8 +468,7 @@ func (co *Coroutine) Watch(ev ...Event) {
 
 // Cleanup represents any type that carries a Cleanup method.
 // A Cleanup can be added to a coroutine in a [Task] function for making
-// an effect some time later when the coroutine resumes or ends or exits, or
-// when the coroutine is making a transition to work on another [Task].
+// an effect some time later when the coroutine resumes or finishes a [Task].
 type Cleanup interface {
 	Cleanup()
 }
@@ -476,8 +479,7 @@ type CleanupFunc func()
 // Cleanup implements the [Cleanup] interface.
 func (f CleanupFunc) Cleanup() { f() }
 
-// Cleanup adds something to clean up when co resumes or ends or exits, or when
-// co is making a transition to work on another [Task].
+// Cleanup adds something to clean up when co resumes or finishes a [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
 	if c == nil {
 		return
@@ -485,8 +487,7 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 	co.cleanups = append(co.cleanups, c)
 }
 
-// CleanupFunc adds a function call when co resumes or ends or exits, or when
-// co is making a transition to work on another [Task].
+// CleanupFunc adds a function call when co resumes or finishes a [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
 	if f == nil {
 		return
@@ -553,8 +554,7 @@ func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
 // Spawn runs t immediately. If t panics immediately, Spawn panics, too.
 //
 // Child coroutines, if not yet ended, are canceled when the parent one resumes
-// or ends or exits, or when the parent one is making a transition to work on
-// another [Task].
+// or finishes a [Task].
 // When a coroutine is canceled, it runs to completion with all yield points
 // treated like exit points.
 //
@@ -863,7 +863,7 @@ func (c *controller) cleanup() {
 // to do.
 //
 // The argument co must not escape to a non-child coroutine or another goroutine
-// because, co may be put into pool for later reuse when co ends or exits.
+// because, co may be put into pool for later reuse when co completes.
 type Task func(co *Coroutine) Result
 
 // Then returns a [Task] that first works on t, then next after t ends.
@@ -1111,8 +1111,7 @@ func Join(s ...Task) Task {
 
 // Select returns a [Task] that runs each of the given tasks in its own
 // child coroutine and awaits until any of them completes, and then ends.
-// When Select ends, tasks other than the one that completes are canceled
-// (see [Coroutine.Spawn]).
+// When Select ends, tasks other than the one that completes are canceled.
 //
 // When passed no arguments, Select returns a [Task] that never ends.
 func Select(s ...Task) Task {

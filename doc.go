@@ -94,12 +94,11 @@
 // One must cooperatively tell a root coroutine to exit.
 // Though, it's possible to just let them rot in the background. The Go runtime
 // would happily garbage collect them when there are no references to them.
-// However, it's not always clear that this would be the case.
 //
 // By default, canceled child coroutines cannot yield.
 // All yield points are treated like exit points.
 // However, within a [NonCancelable] context, a canceled child coroutine is
-// allowed to yield, which correspondingly causes its parent coroutine to
+// allowed to yield, which would correspondingly cause its parent coroutine to
 // yield, too. In such case, the parent coroutine stays suspended until all
 // its child coroutines complete.
 //
