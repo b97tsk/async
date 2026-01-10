@@ -139,8 +139,6 @@ func (co *Coroutine) Resume() {
 
 func (e *Executor) resumeCoroutine(co *Coroutine, lock bool) {
 	switch flag := co.flag; {
-	case flag&flagEnded != 0:
-		panic("async: coroutine has already ended")
 	case flag&flagEnqueued != 0:
 		co.flag = flag | flagResumed
 	default:
@@ -416,11 +414,6 @@ func (co *Coroutine) Resumed() bool {
 	return co.flag&flagResumed != 0
 }
 
-// Ended reports whether co has already ended (or exited).
-func (co *Coroutine) Ended() bool {
-	return co.flag&flagEnded != 0
-}
-
 // Exiting reports whether co is exiting.
 //
 // When exiting, entering a [Func], in a deferred task, would temporarily
@@ -450,8 +443,8 @@ func (co *Coroutine) NonCancelable() bool {
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
 	switch flag := co.flag; {
-	case flag&(flagEnded|flagCleanup) != 0:
-		return
+	case flag&flagCleanup != 0:
+		panic("async: watch during cleanup")
 	case flag&(flagCanceled|flagNonCancelable) == flagCanceled:
 		return
 	}
@@ -486,9 +479,6 @@ func (f CleanupFunc) Cleanup() { f() }
 // Cleanup adds something to clean up when co resumes or ends or exits, or when
 // co is making a transition to work on another [Task].
 func (co *Coroutine) Cleanup(c Cleanup) {
-	if co.Ended() {
-		panic("async: coroutine has already ended")
-	}
 	if c == nil {
 		return
 	}
@@ -498,9 +488,6 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 // CleanupFunc adds a function call when co resumes or ends or exits, or when
 // co is making a transition to work on another [Task].
 func (co *Coroutine) CleanupFunc(f func()) {
-	if co.Ended() {
-		panic("async: coroutine has already ended")
-	}
 	if f == nil {
 		return
 	}
@@ -510,9 +497,6 @@ func (co *Coroutine) CleanupFunc(f func()) {
 // Defer adds a [Task] for execution when returning from a [Func].
 // Deferred tasks are executed in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
-	if co.Ended() {
-		panic("async: coroutine has already ended")
-	}
 	if t == nil {
 		return
 	}
@@ -567,10 +551,6 @@ func (co *Coroutine) Recover2() (v any, stacktrace []byte) {
 // In such case, the parent coroutine stays suspended until all its child
 // coroutines complete.
 func (co *Coroutine) Spawn(t Task) {
-	if co.Ended() {
-		panic("async: coroutine has already ended")
-	}
-
 	level := co.level + 1
 	if level == 0 {
 		panic("async: too many levels")
