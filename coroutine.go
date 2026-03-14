@@ -59,16 +59,17 @@ type Coroutine struct {
 	_ noCopy
 
 	flag        uint16
-	level       uint32
+	level       uint16
+	childnum    uint32
 	weight      Weight
 	parent      *Coroutine
 	executor    *Executor
+	wg          *sync.WaitGroup
 	ps          panicstack
 	guard       func() bool
 	task        Task
 	deps        map[Event]struct{}
 	cleanups    []Cleanup
-	childnum    int
 	defers      []Task
 	controllers []controller
 }
@@ -90,28 +91,23 @@ func freeCoroutine(co *Coroutine) {
 	co.flag |= flagNonRecyclable
 	co.parent = nil
 	co.executor = nil
+	wg := co.wg
+	co.wg = nil
 	clear(co.ps)
 	co.ps = co.ps[:0]
 	co.task = nil
 	coroutinePool.Put(co)
+	if wg != nil {
+		wg.Done()
+	}
 }
 
-func (co *Coroutine) init(e *Executor, t Task) *Coroutine {
+func (co *Coroutine) init(l uint16, w Weight, e *Executor, t Task) *Coroutine {
 	co.flag = flagResumed
-	co.level = 0
-	co.weight = 0
+	co.level = l
+	co.weight = w
 	co.executor = e
 	co.task = t
-	return co
-}
-
-func (co *Coroutine) withLevel(l uint32) *Coroutine {
-	co.level = l
-	return co
-}
-
-func (co *Coroutine) withWeight(w Weight) *Coroutine {
-	co.weight = w
 	return co
 }
 
@@ -338,14 +334,14 @@ func (co *Coroutine) run() (suspended bool) {
 	if len(co.cleanups) != 0 {
 		panic("async: internal error: cleanups did not clear")
 	}
-	if co.childnum != 0 {
-		panic("async: internal error: child coroutines did not clear")
-	}
 	if len(co.defers) != 0 {
 		panic("async: internal error: defers did not clear")
 	}
 	if len(co.controllers) != 0 {
 		panic("async: internal error: controllers did not clear")
+	}
+	if co.childnum != 0 {
+		panic("async: internal error: child coroutines did not clear")
 	}
 
 	if co.flag&flagEnqueued == 0 {
@@ -567,8 +563,11 @@ func (co *Coroutine) Spawn(t Task) {
 	if level == 0 {
 		panic("async: too many levels")
 	}
+	if co.childnum+1 == 0 {
+		panic("async: too many child coroutines")
+	}
 
-	child := newCoroutine().init(co.executor, t).withLevel(level).withWeight(co.weight)
+	child := newCoroutine().init(level, co.weight, co.executor, t)
 	child.parent = co
 	co.childnum++
 

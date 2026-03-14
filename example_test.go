@@ -95,8 +95,8 @@ func Example() {
 }
 
 // This example demonstrates how to set up an autorun function to run
-// an executor in a goroutine automatically whenever a coroutine is spawned or
-// resumed.
+// an [async.Executor] in a goroutine automatically whenever a coroutine is
+// spawned or resumed.
 func Example_nonBlocking() {
 	var wg sync.WaitGroup // For keeping track of goroutines.
 
@@ -298,6 +298,29 @@ func Example_transition() {
 	// 4 (transitioned)
 	// 5 (transitioned)
 	// 7
+}
+
+// This example demonstrates how to tell an [async.Executor] to do something
+// and also wait for it to complete at the same time.
+func ExampleExecutor_SpawnBlocking() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
+
+	myExecutor.SpawnBlocking(func(co *async.Coroutine) async.Result {
+		var sig async.Signal
+		wg.Go(func() {
+			time.Sleep(100 * time.Millisecond)
+			fmt.Println("after 100ms")
+			myExecutor.Spawn(async.Do(sig.Notify))
+		})
+		return co.Await(&sig).End()
+	})
+
+	// Output:
+	// after 100ms
 }
 
 // This example demonstrates how to await a state until a condition is met.

@@ -77,6 +77,12 @@ func (e *Executor) Spawn(t Task) {
 	e.SpawnWeighted(0, t)
 }
 
+// SpawnBlocking is like [Executor.Spawn] but also blocks the running goroutine
+// until t completes.
+func (e *Executor) SpawnBlocking(t Task) {
+	e.SpawnWeightedBlocking(0, t)
+}
+
 // SpawnWeighted creates a coroutine with weight w to work on t.
 //
 // The coroutine is added in a queue. To run it, either call the Run method, or
@@ -84,9 +90,27 @@ func (e *Executor) Spawn(t Task) {
 //
 // SpawnWeighted is safe for concurrent use.
 func (e *Executor) SpawnWeighted(w Weight, t Task) {
+	e.spawn(nil, w, t)
+}
+
+// SpawnWeightedBlocking is like [Executor.SpawnWeighted] but also blocks
+// the running goroutine until t completes.
+func (e *Executor) SpawnWeightedBlocking(w Weight, t Task) {
+	wg := waitGroupPool.Get().(*sync.WaitGroup)
+	e.spawn(wg, w, t)
+	wg.Wait()
+	waitGroupPool.Put(wg)
+}
+
+func (e *Executor) spawn(wg *sync.WaitGroup, w Weight, t Task) {
 	var autorun func()
 
-	co := newCoroutine().init(e, t).withWeight(w)
+	co := newCoroutine().init(0, w, e, t)
+
+	if wg != nil {
+		wg.Add(1)
+		co.wg = wg
+	}
 
 	e.mu.Lock()
 
@@ -101,4 +125,8 @@ func (e *Executor) SpawnWeighted(w Weight, t Task) {
 	if autorun != nil {
 		autorun()
 	}
+}
+
+var waitGroupPool = sync.Pool{
+	New: func() any { return new(sync.WaitGroup) },
 }
