@@ -25,9 +25,10 @@ const (
 	flagEnqueued
 	flagCleanup
 	flagEnded
+	flagFreed
+	flagCanceled
 	flagExiting
 	flagPanicking
-	flagCanceled
 	flagNonCancelable
 	flagNonRecyclable
 )
@@ -85,10 +86,10 @@ func newCoroutine() *Coroutine {
 }
 
 func freeCoroutine(co *Coroutine) {
-	if co.flag&flagNonRecyclable != 0 {
-		return
+	if co.flag&flagFreed != 0 {
+		panic("async: internal error: double free")
 	}
-	co.flag |= flagNonRecyclable
+	co.flag |= flagFreed
 	co.parent = nil
 	co.executor = nil
 	wg := co.wg
@@ -96,7 +97,9 @@ func freeCoroutine(co *Coroutine) {
 	clear(co.ps)
 	co.ps = co.ps[:0]
 	co.task = nil
-	coroutinePool.Put(co)
+	if co.flag&flagNonRecyclable == 0 {
+		coroutinePool.Put(co)
+	}
 	if wg != nil {
 		wg.Done()
 	}
