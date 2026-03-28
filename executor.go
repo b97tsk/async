@@ -27,7 +27,7 @@ import "sync"
 // An Executor never calls the autorun function twice at the same time.
 type Executor struct {
 	mu      sync.Mutex
-	pq      priorityqueue[*Coroutine]
+	pq      priorityqueue
 	ps      panicstack
 	running bool
 	autorun func()
