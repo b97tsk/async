@@ -1257,8 +1257,8 @@ func Example_panicAndRecover() {
 	// A
 	// A
 	// --- SEPARATOR ---
-	// async: unhandled break action
-	// async: unhandled continue action
+	// async: break without a loop
+	// async: continue without a loop
 	// --- SEPARATOR ---
 	// <nil>
 	// A

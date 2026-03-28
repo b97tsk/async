@@ -1,6 +1,7 @@
 package async
 
 import (
+	"fmt"
 	"iter"
 	"slices"
 	"sync"
@@ -29,6 +30,7 @@ const (
 	flagCanceled
 	flagExiting
 	flagPanicking
+	flagInsideLoop
 	flagNonCancelable
 	flagNonRecyclable
 )
@@ -274,12 +276,12 @@ func (co *Coroutine) run() (suspended bool) {
 
 		if res.controller.kind != 0 {
 			addController := true
-			if res.controller.kind == funcController && !res.controller.wasExiting && !res.controller.wasPanicking {
+			if res.controller.kind == funcController && res.controller.flag == 0 {
 				lastController := &controller{kind: funcController}
 				if n := len(co.controllers); n != 0 {
 					lastController = &co.controllers[n-1]
 				}
-				if lastController.kind == funcController && lastController.numDefer == res.controller.numDefer {
+				if lastController.kind == funcController && lastController.doff == res.controller.doff {
 					// Tail-call optimization:
 					// If the last controller is also a funcController, do not add another one.
 					// (doTailTransition also pays tribute to this optimization.)
@@ -705,12 +707,18 @@ func (co *Coroutine) End() Result {
 
 // Break returns a [Result] that will cause co to break a [Loop] (or [LoopN]).
 func (co *Coroutine) Break() Result {
+	if co.flag&flagInsideLoop == 0 {
+		panic("async: break without a loop")
+	}
 	return Result{action: doBreak}
 }
 
 // Continue returns a [Result] that will cause co to continue a [Loop]
 // (or [LoopN]).
 func (co *Coroutine) Continue() Result {
+	if co.flag&flagInsideLoop == 0 {
+		panic("async: continue without a loop")
+	}
 	return Result{action: doContinue}
 }
 
@@ -765,15 +773,14 @@ const (
 )
 
 type controller struct {
-	kind         controllerKind
-	wasExiting   bool                // used by funcController only
-	wasPanicking bool                // used by funcController only
-	numPanic     int                 // used by funcController only
-	numDefer     int                 // used by funcController only
-	task         Task                // used by thenController and loopController
-	tasks        []Task              // used by blockController only
-	next         func() (Task, bool) // used by seqController only
-	stop         func()              // used by seqController only
+	kind  controllerKind
+	flag  uint16              // used by funcController and loopController
+	poff  int                 // used by funcController only
+	doff  int                 // used by funcController only
+	task  Task                // used by thenController and loopController
+	tasks []Task              // used by blockController only
+	next  func() (Task, bool) // used by seqController only
+	stop  func()              // used by seqController only
 }
 
 func (c *controller) negotiate(co *Coroutine, res Result) Result {
@@ -781,12 +788,12 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 	case funcController:
 		switch res.action {
 		case doEnd, doReturn, doRaise:
-			if !co.Panicking() && len(co.ps) > c.numPanic {
+			if !co.Panicking() && len(co.ps) > c.poff {
 				// Discard recovered panic values.
-				clear(co.ps[c.numPanic:])
-				co.ps = co.ps[:c.numPanic]
+				clear(co.ps[c.poff:])
+				co.ps = co.ps[:c.poff]
 			}
-			if len(co.defers) > c.numDefer {
+			if len(co.defers) > c.doff {
 				i := len(co.defers) - 1
 				t := co.defers[i]
 				co.defers[i] = nil
@@ -794,22 +801,15 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				return co.Transition(t)
 			}
 			raise := co.flag&(flagExiting|flagPanicking) != 0
-			if c.wasExiting {
-				co.flag |= flagExiting
-			}
-			if c.wasPanicking {
-				co.flag |= flagPanicking
-			}
+			co.flag |= c.flag
 			if raise {
 				return co.raise()
 			}
 			return co.End()
-		case doBreak:
-			panic("async: unhandled break action")
-		case doContinue:
-			panic("async: unhandled continue action")
+		case doBreak, doContinue:
+			panic("async: internal error: unhandled break/continue action")
 		default:
-			panic("async: internal error: unknown action")
+			panic(fmt.Sprintf("async: unknown action: %v", res.action))
 		}
 	case thenController:
 		if res.action != doEnd {
@@ -829,15 +829,16 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 		return Result{action: action, task: must(t)}
 	case loopController:
 		switch res.action {
-		case doEnd:
+		case doEnd, doContinue:
 			return co.Transition(c.task)
-		case doBreak:
-			return co.End()
-		case doContinue:
-			return co.Transition(c.task)
-		default:
-			return res
 		}
+		if c.flag == 0 {
+			co.flag &^= flagInsideLoop
+		}
+		if res.action == doBreak {
+			return co.End()
+		}
+		return res
 	case seqController:
 		if res.action == doEnd {
 			if t, ok := c.next(); ok {
@@ -931,12 +932,16 @@ func Block(s ...Task) Task {
 
 // Break returns a [Task] that breaks a [Loop] (or [LoopN]).
 func Break() Task {
-	return (*Coroutine).Break
+	return func(co *Coroutine) Result {
+		return co.Break()
+	}
 }
 
 // Continue returns a [Task] that continues a [Loop] (or [LoopN]).
 func Continue() Task {
-	return (*Coroutine).Continue
+	return func(co *Coroutine) Result {
+		return co.Continue()
+	}
 }
 
 // Loop returns a [Task] that forms a loop, which would run t repeatedly.
@@ -944,11 +949,17 @@ func Continue() Task {
 // Both [Coroutine.Continue] and [Continue] can continue this loop early.
 func Loop(t Task) Task {
 	return func(co *Coroutine) Result {
-		return Result{
-			action:     doTransition,
-			task:       must(t),
-			controller: controller{kind: loopController, task: t},
+		res := Result{
+			action: doTransition,
+			task:   must(t),
+			controller: controller{
+				kind: loopController,
+				flag: co.flag & flagInsideLoop,
+				task: t,
+			},
 		}
+		co.flag |= flagInsideLoop
+		return res
 	}
 }
 
@@ -966,11 +977,17 @@ func LoopN[Int intType](n Int, t Task) Task {
 			}
 			return co.Break()
 		}
-		return Result{
-			action:     doTransition,
-			task:       f,
-			controller: controller{kind: loopController, task: f},
+		res := Result{
+			action: doTransition,
+			task:   f,
+			controller: controller{
+				kind: loopController,
+				flag: co.flag & flagInsideLoop,
+				task: f,
+			},
 		}
+		co.flag |= flagInsideLoop
+		return res
 	}
 }
 
@@ -1014,18 +1031,18 @@ func Panic(v any) Task {
 // Spawned tasks are considered surrounded by an invisible [Func].
 func Func(t Task) Task {
 	return func(co *Coroutine) Result {
+		const flag = flagExiting | flagPanicking | flagInsideLoop
 		res := Result{
 			action: doTransition,
 			task:   must(t),
 			controller: controller{
-				kind:         funcController,
-				wasExiting:   co.Exiting(),
-				wasPanicking: co.Panicking(),
-				numPanic:     len(co.ps),
-				numDefer:     len(co.defers),
+				kind: funcController,
+				flag: co.flag & flag,
+				poff: len(co.ps),
+				doff: len(co.defers),
 			},
 		}
-		co.flag &^= flagExiting | flagPanicking
+		co.flag &^= flag
 		return res
 	}
 }
@@ -1062,13 +1079,13 @@ func NonCancelable(t Task) Task {
 func actionToTask(action action) Task {
 	switch action {
 	case doEnd:
-		return End()
+		return (*Coroutine).End
 	case doBreak:
-		return Break()
+		return (*Coroutine).Break
 	case doContinue:
-		return Continue()
+		return (*Coroutine).Continue
 	case doReturn:
-		return Return()
+		return (*Coroutine).Return
 	case doRaise:
 		return (*Coroutine).raise
 	default:
