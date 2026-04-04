@@ -27,18 +27,18 @@ func (ps *panicstack) Try(f func()) (ok bool) {
 			if _, ok := v.(dummy); ok {
 				return // Ignore dummy values.
 			}
-			ps.push(v, debug.Stack())
+			ps.Push(v, debug.Stack())
 		}
 	}()
 	f()
 	return true
 }
 
-func (ps *panicstack) push(v any, stack []byte) {
+func (ps *panicstack) Push(v any, stacktrace []byte) {
 	s := *ps
 	n := len(s)
 	repanicked := n != 0 && equal(v, s[n-1].value)
-	s = append(s, panicitem{v, stack, repanicked, false})
+	s = append(s, panicitem{v, stacktrace, repanicked, false})
 	*ps = s
 }
 
@@ -49,7 +49,7 @@ func equal(a, b any) bool {
 
 type panicitem struct {
 	value      any
-	stack      []byte
+	stacktrace []byte
 	repanicked bool
 	recovered  bool
 }
@@ -72,9 +72,9 @@ func (pv *panicvalue) Error() string {
 		case p.recovered:
 			b.WriteString(" (recovered)")
 		}
-		if p.stack != nil {
+		if p.stacktrace != nil {
 			b.WriteString("\n\n")
-			b.Write(p.stack)
+			b.Write(p.stacktrace)
 		}
 	}
 	return b.String()

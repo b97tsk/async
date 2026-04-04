@@ -1033,29 +1033,12 @@ func ExampleMergeSeq() {
 
 	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
-	sleep := func(d time.Duration) async.Task {
-		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
-			wg.Add(1) // Keep track of timers too.
-			tm := time.AfterFunc(d, func() {
-				defer wg.Done()
-				myExecutor.Spawn(async.Do(sig.Notify))
-			})
-			co.CleanupFunc(func() {
-				if tm.Stop() {
-					wg.Done()
-				}
-			})
-			return co.Await(&sig).End()
-		}
-	}
-
 	myExecutor.Spawn(async.MergeSeq(3, func(yield func(async.Task) bool) {
 		defer fmt.Println("done")
 		for n := 1; n <= 6; n++ {
 			d := time.Duration(n*100) * time.Millisecond
 			f := func() { fmt.Println(n) }
-			t := sleep(d).Then(async.Do(f))
+			t := async.Sleep(context.Background(), &wg, d).Then(async.Do(f))
 			if !yield(t) {
 				return
 			}
@@ -1066,13 +1049,13 @@ func ExampleMergeSeq() {
 	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Select(
-		sleep(1000*time.Millisecond), // Cancel the following task after a period of time.
+		async.Sleep(context.Background(), &wg, 1000*time.Millisecond), // Cancel the following task after 1s.
 		async.MergeSeq(3, func(yield func(async.Task) bool) {
 			defer fmt.Println("done")
 			for n := 1; ; n++ { // Infinite loop.
 				d := time.Duration(n*100) * time.Millisecond
 				f := func() { fmt.Println(n) }
-				t := sleep(d).Then(async.Do(f))
+				t := async.Sleep(context.Background(), &wg, d).Then(async.Do(f))
 				if !yield(t) {
 					return
 				}
@@ -1124,23 +1107,6 @@ func Example_panicAndRecover() {
 		})
 	})
 
-	sleep := func(d time.Duration) async.Task {
-		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
-			wg.Add(1) // Keep track of timers too.
-			tm := time.AfterFunc(d, func() {
-				defer wg.Done()
-				myExecutor.Spawn(async.Do(sig.Notify))
-			})
-			co.CleanupFunc(func() {
-				if tm.Stop() {
-					wg.Done()
-				}
-			})
-			return co.Await(&sig).End()
-		}
-	}
-
 	recover := func(co *async.Coroutine) async.Result {
 		fmt.Println(co.Recover())
 		return co.End()
@@ -1178,7 +1144,7 @@ func Example_panicAndRecover() {
 			async.Defer(recover),
 			func(co *async.Coroutine) async.Result {
 				co.Spawn(async.Block(
-					sleep(100*time.Millisecond),
+					async.Sleep(context.Background(), &wg, 100*time.Millisecond),
 					async.Do(func() { panic("A") }), // Panics after 100ms.
 				))
 				co.Spawn(async.Block(
@@ -1282,6 +1248,24 @@ func Example_panicAndRecover() {
 	wg.Wait()
 	fmt.Println("--- SEPARATOR ---")
 
+	myExecutor.Spawn(async.Join(
+		async.Block(
+			async.Defer(recover),
+			async.Go(context.Background(), &wg, func(_ context.Context) async.Task {
+				panic("A")
+			}),
+		),
+		async.Block(
+			async.Defer(recover),
+			async.Go(context.Background(), &wg, func(_ context.Context) async.Task {
+				return async.Panic("A")
+			}),
+		),
+	))
+
+	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
+
 	myExecutor.Spawn(func(_ *async.Coroutine) async.Result {
 		panic(dummyError) // Unrecovered panics get repanicked when (*async.Executor).Run returns.
 	})
@@ -1313,6 +1297,9 @@ func Example_panicAndRecover() {
 	// A
 	// B
 	// <nil>
+	// --- SEPARATOR ---
+	// A
+	// A
 	// --- SEPARATOR ---
 	// dummy error recovered!
 }

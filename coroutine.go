@@ -1,10 +1,13 @@
 package async
 
 import (
+	"context"
 	"fmt"
 	"iter"
+	"runtime/debug"
 	"slices"
 	"sync"
+	"time"
 )
 
 type action int
@@ -802,14 +805,28 @@ func (co *Coroutine) raise() Result {
 	return Result{action: doRaise}
 }
 
-// Panic returns a [Result] that will cause co to behave like there's a panic.
+// Panic returns a [Result] that will cause co to behave as there's a panic.
 // Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
 func (co *Coroutine) Panic(v any) Result {
 	if v == nil {
 		panic("async: Panic called with nil argument")
 	}
-	co.ps.push(v, nil)
+	co.ps.Push(v, nil)
+	co.flag |= flagPanicking
+	return Result{action: doRaise}
+}
+
+// PanicWithStackTrace returns a [Result] that will cause co to behave as
+// there's a panic.
+// PanicWithStackTrace takes an extra stacktrace argument, which makes it
+// very much like the built-in panic function.
+// Useful when one wants to propagate panics from goroutines.
+func (co *Coroutine) PanicWithStackTrace(v any, stacktrace []byte) Result {
+	if v == nil {
+		panic("async: PanicWithStackTrace called with nil argument")
+	}
+	co.ps.Push(v, stacktrace)
 	co.flag |= flagPanicking
 	return Result{action: doRaise}
 }
@@ -1291,4 +1308,78 @@ func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
 			}
 		}).End()
 	}
+}
+
+// A Goer is for spawning goroutines and keeping track of them.
+//
+// For go1.25 and later, a [sync.WaitGroup] would satisfy this interface.
+type Goer interface {
+	Go(f func())
+}
+
+// Go returns a [Task] that uses g to spawn a goroutine to run f, which takes
+// a [context.Context] as argument that will be canceled when the running
+// coroutine or ctx is canceled.
+// The return value of f, a [Task], if non-nil, will be run after f returns.
+// To cancel Go, f must return a [Task] that terminates Go, such as [Exit].
+// If f panics, Go propagates it.
+// Go completes only when everything is settled.
+func Go(ctx context.Context, g Goer, f func(ctx context.Context) Task) Task {
+	return func(co *Coroutine) Result {
+		ctx, cancel := context.WithCancel(ctx)
+		co.CleanupFunc(cancel)
+		var state struct {
+			Signal
+			done bool
+			t    Task
+			v    any
+			s    []byte
+		}
+		t := func(co *Coroutine) Result {
+			switch {
+			case state.done:
+				if state.t != nil {
+					return co.Transition(state.t)
+				}
+				if state.v != nil {
+					return co.PanicWithStackTrace(state.v, state.s)
+				}
+				if co.Canceled() && !co.NonCancelable() {
+					return co.Exit()
+				}
+				return co.End()
+			case co.Canceled():
+				return co.HardYield(&state)
+			default:
+				state.done = true
+				state.Notify()
+				return co.End()
+			}
+		}
+		e, w := co.Executor(), co.Weight()
+		g.Go(func() {
+			defer func() {
+				if v := recover(); v != nil {
+					state.v, state.s = v, debug.Stack()
+				}
+				e.SpawnWeighted(w, t)
+			}()
+			state.t = f(ctx)
+		})
+		return co.SoftAwait(&state).Then(t)
+	}
+}
+
+// Sleep returns a [Task] that awaits until a period of time elapses, and then
+// ends.
+// When ctx is canceled, the coroutine that runs Sleep exits.
+func Sleep(ctx context.Context, g Goer, d time.Duration) Task {
+	return Go(ctx, g, func(ctx context.Context) Task {
+		select {
+		case <-ctx.Done():
+			return Exit()
+		case <-time.After(d):
+			return nil
+		}
+	})
 }
