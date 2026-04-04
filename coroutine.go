@@ -12,6 +12,8 @@ type action int
 const (
 	_ action = iota
 	doYield
+	doSoftYield
+	doHardYield
 	doTransition
 	doTailTransition // Do transition and remove controller.
 	doEnd
@@ -28,6 +30,8 @@ const (
 	flagEnded
 	flagFreed
 	flagCanceled
+	flagSoftYield
+	flagHardYield
 	flagExiting
 	flagPanicking
 	flagInsideLoop
@@ -204,14 +208,31 @@ func (co *Coroutine) run() (suspended bool) {
 			return true
 		}
 
-		co.flag &^= flagResumed | flagCleanup
+		co.flag &^= flagResumed | flagCleanup | flagSoftYield
+
+		if !co.NonCancelable() {
+			co.flag &^= flagHardYield
+		}
 
 		if !ps.Try(func() { res = co.task(co) }) {
 			res = co.panic()
 		}
 
-		if res.action == doYield && co.flag&(flagCanceled|flagNonCancelable) == flagCanceled {
-			res = co.cancel()
+		switch res.action {
+		case doYield:
+			if co.Canceled() && !co.NonCancelable() {
+				res = co.cancel()
+			}
+		case doSoftYield:
+			if co.Canceled() {
+				res = Result{action: doTransition, task: res.task}
+			} else {
+				co.flag |= flagSoftYield
+				res.action = doYield
+			}
+		case doHardYield:
+			co.flag |= flagHardYield
+			res.action = doYield
 		}
 
 		if res.action != doYield && res.action != doTransition {
@@ -387,10 +408,12 @@ type childCoroutineCleanup Coroutine
 func (child *childCoroutineCleanup) Cleanup() {
 	co := (*Coroutine)(child)
 	co.flag |= flagCanceled
-	if !co.NonCancelable() {
-		co.flag |= flagExiting
+	if co.flag&(flagSoftYield|flagHardYield) != flagHardYield {
 		co.guard = nil
-		co.task = (*Coroutine).raise
+		if co.flag&flagSoftYield == 0 {
+			co.flag |= flagExiting
+			co.task = (*Coroutine).raise
+		}
 		co.run()
 	}
 }
@@ -447,11 +470,8 @@ func (co *Coroutine) NonCancelable() bool {
 
 // Watch watches some events so that, when any of them notifies, co resumes.
 func (co *Coroutine) Watch(ev ...Event) {
-	switch flag := co.flag; {
-	case flag&flagCleanup != 0:
+	if co.flag&flagCleanup != 0 {
 		panic("async: watch during cleanup")
-	case flag&(flagCanceled|flagNonCancelable) == flagCanceled:
-		return
 	}
 	var deps map[Event]struct{}
 	for _, d := range ev {
@@ -560,8 +580,8 @@ func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
 // treated like exit points.
 //
 // However, within a [NonCancelable] context, a canceled coroutine is allowed
-// to yield, which correspondingly causes its parent coroutine to yield, too.
-// In such case, the parent coroutine stays suspended until all its child
+// to yield, which would correspondingly cause its parent coroutine to yield,
+// too. In such case, the parent coroutine stays suspended until all its child
 // coroutines complete.
 func (co *Coroutine) Spawn(t Task) {
 	level := co.level + 1
@@ -607,8 +627,8 @@ func (co *Coroutine) Spawn(t Task) {
 // one should just return a Result right after it is created.
 type Result struct {
 	action     action
-	guard      func() bool // used by doYield only
-	task       Task        // used by doYield, doTransition and doTailTransition
+	guard      func() bool // used by do(C|NC)Yield only
+	task       Task        // used by do(C|NC)Yield and do(Tail)Transition
 	controller controller  // used by doTransition only
 }
 
@@ -687,11 +707,45 @@ func (co *Coroutine) Await(ev ...Event) PendingResult {
 	return PendingResult{res: Result{action: doYield}}
 }
 
+// SoftAwait is like [Coroutine.Await], but cancelable.
+// Upon cancellation, where [Coroutine.Await] would unwind and exit,
+// SoftAwait would just resume and continue running.
+func (co *Coroutine) SoftAwait(ev ...Event) PendingResult {
+	if len(ev) != 0 {
+		co.Watch(ev...)
+	}
+	return PendingResult{res: Result{action: doSoftYield}}
+}
+
+// HardAwait is like [Coroutine.Await], but non-cancelable.
+// Upon cancellation, where [Coroutine.Await] would unwind and exit,
+// HardAwait would just do nothing and remain suspended.
+func (co *Coroutine) HardAwait(ev ...Event) PendingResult {
+	if len(ev) != 0 {
+		co.Watch(ev...)
+	}
+	return PendingResult{res: Result{action: doHardYield}}
+}
+
 // Yield returns a [Result] that will cause co to yield and, when co is resumed,
 // reiterate the running task.
 // Yield also accepts additional events to watch.
 func (co *Coroutine) Yield(ev ...Event) Result {
 	return co.Await(ev...).Reiterate()
+}
+
+// SoftYield is like [Coroutine.Yield], but cancelable.
+// Upon cancellation, where [Coroutine.Yield] would unwind and exit,
+// SoftYield would just resume and continue running.
+func (co *Coroutine) SoftYield(ev ...Event) Result {
+	return co.SoftAwait(ev...).Reiterate()
+}
+
+// HardYield is like [Coroutine.Yield], but non-cancelable.
+// Upon cancellation, where [Coroutine.Yield] would unwind and exit,
+// HardYield would just do nothing and remain suspended.
+func (co *Coroutine) HardYield(ev ...Event) Result {
+	return co.HardAwait(ev...).Reiterate()
 }
 
 // Transition returns a [Result] that will cause co to make a transition to
@@ -847,7 +901,7 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 		}
 		return res
 	case ncController:
-		co.flag &^= flagNonCancelable
+		co.flag &^= flagHardYield | flagNonCancelable
 		return res
 	default:
 		panic("async: internal error: unknown controller")
@@ -907,6 +961,36 @@ func Await(ev ...Event) Task {
 	}
 	return func(co *Coroutine) Result {
 		return co.Await(ev...).End()
+	}
+}
+
+// SoftAwait is like [Await], but cancelable.
+// Upon cancellation, where [Await] would unwind and exit, SoftAwait would
+// just resume and continue running.
+func SoftAwait(ev ...Event) Task {
+	if len(ev) == 0 {
+		// Return a pure function instead.
+		return func(co *Coroutine) Result {
+			return co.SoftAwait().End()
+		}
+	}
+	return func(co *Coroutine) Result {
+		return co.SoftAwait(ev...).End()
+	}
+}
+
+// HardAwait is like [Await], but non-cancelable.
+// Upon cancellation, where [Await] would unwind and exit, HardAwait would
+// just do nothing and remain suspended.
+func HardAwait(ev ...Event) Task {
+	if len(ev) == 0 {
+		// Return a pure function instead.
+		return func(co *Coroutine) Result {
+			return co.HardAwait().End()
+		}
+	}
+	return func(co *Coroutine) Result {
+		return co.HardAwait(ev...).End()
 	}
 }
 
@@ -1065,11 +1149,14 @@ func FromSeq(seq iter.Seq[Task]) Task {
 
 // NonCancelable returns a [Task] that runs t in a non-cancelable context,
 // preventing it from being canceled by a parent coroutine.
+//
+// For one-shot non-cancelable yields, one can use [HardAwait],
+// [Coroutine.HardAwait] or [Coroutine.HardYield].
 func NonCancelable(t Task) Task {
 	return func(co *Coroutine) Result {
 		res := co.Transition(t)
 		if !co.NonCancelable() {
-			co.flag |= flagNonCancelable
+			co.flag |= flagHardYield | flagNonCancelable
 			res.controller.kind = ncController
 		}
 		return res

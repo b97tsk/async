@@ -416,6 +416,55 @@ func ExampleTask_Then() {
 	// 9
 }
 
+func ExampleAwait_various() {
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	var sig1, sig2 async.Signal
+
+	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+		co.CleanupFunc(func() { fmt.Println("A") })
+		co.Defer(async.Do(func() { fmt.Println("B") }))
+		co.Spawn(async.Block(
+			async.Defer(async.Do(func() { fmt.Println("C") })),
+			async.Await(&sig2), // Cancelable (exit when canceled).
+			async.Do(func() { fmt.Println("D") }),
+		))
+		co.Spawn(async.Block(
+			async.Defer(async.Do(func() { fmt.Println("E") })),
+			async.SoftAwait(&sig2), // Cancelable (resume when canceled).
+			async.Do(func() { fmt.Println("F") }),
+			async.SoftAwait(),
+		))
+		co.Spawn(async.Block(
+			async.Defer(async.Do(func() { fmt.Println("G") })),
+			async.HardAwait(&sig2), // Non-cancelable.
+			async.Do(func() { fmt.Println("H") }),
+			async.HardAwait(), // Awaits forever.
+		))
+		return co.Await(&sig1).End()
+	})
+
+	myExecutor.Spawn(async.Do(func() {
+		fmt.Println("notifying sig1")
+		sig1.Notify()
+	}))
+	myExecutor.Spawn(async.Do(func() {
+		fmt.Println("notifying sig2")
+		sig2.Notify()
+	}))
+
+	// Output:
+	// notifying sig1
+	// F
+	// E
+	// C
+	// A
+	// notifying sig2
+	// H
+}
+
 // This example demonstrates how to run a block of tasks.
 // A block can have zero or more tasks.
 // A block runs tasks in sequence.
