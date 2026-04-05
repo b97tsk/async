@@ -612,26 +612,30 @@ func (co *Coroutine) Spawn(t Task) {
 // A Result determines what next for a coroutine to do after running a task.
 //
 // A Result can be created by calling one of the following methods:
-//   - [Coroutine.Await]: for creating a [PendingResult] that can be transformed
-//     into a [Result] with one of its methods, which will then cause
-//     the running coroutine to yield;
-//   - [Coroutine.Yield]: for yielding a coroutine with additional events to
-//     watch and, when resumed, reiterating the running task;
+//   - [Coroutine.Await], [Coroutine.SoftAwait] or [Coroutine.HardAwait]:
+//     for creating a [PendingResult] that can be transformed into a [Result]
+//     with one of its methods, which will then cause the running coroutine to
+//     yield;
+//   - [Coroutine.Yield], [Coroutine.SoftYield] or [Coroutine.HardYield]:
+//     for yielding a coroutine with additional events to watch and, when
+//     resumed, reiterating the running task;
 //   - [Coroutine.Transition]: for making a transition to work on another task;
 //   - [Coroutine.End]: for ending the running task of a coroutine;
 //   - [Coroutine.Break]: for breaking a [Loop] (or [LoopN]);
 //   - [Coroutine.Continue]: for continuing a [Loop] (or [LoopN]);
 //   - [Coroutine.Return]: for returning from a [Func];
 //   - [Coroutine.Exit]: for exiting a coroutine;
-//   - [Coroutine.Panic]: for simulating a panic.
+//   - [Coroutine.Panic]: for simulating a panic;
+//   - [Coroutine.PanicWithStackTrace]: for simulating a panic with a stack
+//     trace.
 //
 // These methods may have side effects. One should never store a Result in
 // a variable and overwrite it with another, before returning it. Instead,
 // one should just return a Result right after it is created.
 type Result struct {
 	action     action
-	guard      func() bool // used by do(C|NC)Yield only
-	task       Task        // used by do(C|NC)Yield and do(Tail)Transition
+	guard      func() bool // used by do(Soft|Hard)Yield only
+	task       Task        // used by do(Soft|Hard)Yield and do(Tail)Transition
 	controller controller  // used by doTransition only
 }
 
