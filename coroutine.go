@@ -1326,8 +1326,12 @@ type Goer interface {
 // Go completes only when everything is settled.
 func Go(ctx context.Context, g Goer, f func(ctx context.Context) Task) Task {
 	return func(co *Coroutine) Result {
-		ctx, cancel := context.WithCancel(ctx)
-		co.CleanupFunc(cancel)
+		ctx := ctx
+		if !co.NonCancelable() {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			co.CleanupFunc(cancel)
+		}
 		var state struct {
 			Signal
 			done bool
