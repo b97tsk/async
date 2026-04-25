@@ -116,6 +116,7 @@ func freeCoroutine(co *Coroutine) {
 }
 
 func (co *Coroutine) init(parent *Coroutine, e *Executor, w Weight, t Task) *Coroutine {
+	var flag uint16 = flagResumed
 	var depth uint16
 	if parent != nil {
 		depth = parent.depth + 1
@@ -125,9 +126,12 @@ func (co *Coroutine) init(parent *Coroutine, e *Executor, w Weight, t Task) *Cor
 		if parent.childnum+1 == 0 {
 			panic("async: too many child coroutines")
 		}
+		if parent.flag&(flagCleanup|flagCanceled) != 0 {
+			flag |= flagCanceled
+		}
 		parent.childnum++
 	}
-	co.flag = flagResumed
+	co.flag = flag
 	co.depth = depth
 	co.weight = w
 	co.parent = parent
@@ -631,12 +635,14 @@ func (co *Coroutine) Spawn(t Task) {
 	child := newCoroutine().init(co, co.executor, co.weight, t)
 	switch child.run() {
 	case suspended:
-		children := co.children
-		if children == nil {
-			children = make(map[*Coroutine]struct{})
-			co.children = children
+		if !child.Canceled() {
+			children := co.children
+			if children == nil {
+				children = make(map[*Coroutine]struct{})
+				co.children = children
+			}
+			children[child] = struct{}{}
 		}
-		children[child] = struct{}{}
 	case panicked:
 		panic(dummy{}) // Stop current task.
 	}

@@ -10,6 +10,24 @@ import (
 )
 
 func TestSpawn(t *testing.T) {
+	t.Run("AfterCanceled", func(t *testing.T) {
+		var myExecutor async.Executor
+
+		myExecutor.Autorun(myExecutor.Run)
+
+		myExecutor.Spawn(async.Select(
+			async.Block(
+				async.Defer(async.Spawn(func(co *async.Coroutine) async.Result {
+					if !co.Canceled() {
+						t.Error("Child coroutines should be canceled when parent is.")
+					}
+					return co.End()
+				})),
+				async.Await(),
+			),
+			async.End(),
+		))
+	})
 	t.Run("AfterPanic", func(t *testing.T) {
 		var myExecutor async.Executor
 
