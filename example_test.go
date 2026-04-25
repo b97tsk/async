@@ -1248,6 +1248,20 @@ func Example_panicAndRecover() {
 	wg.Wait()
 	fmt.Println("--- SEPARATOR ---")
 
+	myExecutor.Spawn(async.Block(
+		async.Defer(recover),
+		async.Select(
+			async.Block(
+				async.Defer(async.Panic("A")),
+				async.Await(),
+			),
+			async.End(),
+		),
+	))
+
+	wg.Wait()
+	fmt.Println("--- SEPARATOR ---")
+
 	myExecutor.Spawn(async.Join(
 		async.Block(
 			async.Defer(recover),
@@ -1297,6 +1311,8 @@ func Example_panicAndRecover() {
 	// A
 	// B
 	// <nil>
+	// --- SEPARATOR ---
+	// A
 	// --- SEPARATOR ---
 	// A
 	// A

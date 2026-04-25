@@ -187,7 +187,15 @@ func (e *Executor) runCoroutine(co *Coroutine) {
 	}
 }
 
-func (co *Coroutine) run() (suspended bool) {
+type status int
+
+const (
+	_ status = iota
+	suspended
+	panicked
+)
+
+func (co *Coroutine) run() status {
 	var res Result
 
 	ps := &co.ps
@@ -206,7 +214,7 @@ func (co *Coroutine) run() (suspended bool) {
 			}
 
 			if !ok {
-				return true
+				return suspended
 			}
 
 			guard = nil
@@ -217,10 +225,14 @@ func (co *Coroutine) run() (suspended bool) {
 		co.flag |= flagCleanup
 
 		co.clearDeps()
-		co.clearCleanups()
+
+		if ok := co.clearCleanups(); !ok {
+			co.flag |= flagPanicking
+			co.task = (*Coroutine).unwind
+		}
 
 		if co.childnum != 0 {
-			return true
+			return suspended
 		}
 
 		co.flag &^= flagResumed | flagCleanup | flagSoftYield
@@ -255,18 +267,20 @@ func (co *Coroutine) run() (suspended bool) {
 			co.flag |= flagCleanup
 
 			co.clearDeps()
-			co.clearCleanups()
+
+			if ok := co.clearCleanups(); !ok {
+				co.flag |= flagPanicking
+				if res.action != doUnwind {
+					res = co.unwind()
+				}
+			}
 
 			if co.childnum != 0 {
 				co.task = actionToTask(res.action)
-				return true
+				return suspended
 			}
 
 			co.flag &^= flagResumed | flagCleanup
-
-			if co.Panicking() {
-				res = co.unwind()
-			}
 
 			controllers := co.controllers
 			for len(controllers) != 0 {
@@ -341,7 +355,7 @@ func (co *Coroutine) run() (suspended bool) {
 	}
 
 	if res.action == doYield {
-		return true
+		return suspended
 	}
 
 	co.flag |= flagEnded
@@ -385,11 +399,17 @@ func (co *Coroutine) run() (suspended bool) {
 		panic("async: internal error: child coroutines did not clear")
 	}
 
+	var status status
+
+	if co.Panicking() {
+		status = panicked
+	}
+
 	if co.flag&flagEnqueued == 0 {
 		freeCoroutine(co)
 	}
 
-	return false
+	return status
 }
 
 func (co *Coroutine) clearDeps() {
@@ -400,7 +420,7 @@ func (co *Coroutine) clearDeps() {
 	}
 }
 
-func (co *Coroutine) clearCleanups() {
+func (co *Coroutine) clearCleanups() bool {
 	ok := true
 	cleanups := co.cleanups
 	for len(co.cleanups) != 0 {
@@ -412,10 +432,7 @@ func (co *Coroutine) clearCleanups() {
 	}
 	clear(cleanups)
 	co.cleanups = cleanups[:0]
-	if !ok {
-		co.flag |= flagPanicking
-		co.task = (*Coroutine).unwind
-	}
+	return ok
 }
 
 type childCoroutineCleanup Coroutine
@@ -600,11 +617,10 @@ func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
 // coroutines complete.
 func (co *Coroutine) Spawn(t Task) {
 	child := newCoroutine().init(co, co.executor, co.weight, t)
-	switch suspended := child.run(); {
+	switch child.run() {
 	case suspended:
 		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))
-	case co.Panicking():
-		// child panics.
+	case panicked:
 		panic(dummy{}) // Stop current task.
 	}
 }

@@ -9,6 +9,32 @@ import (
 	"github.com/b97tsk/async"
 )
 
+func TestSpawn(t *testing.T) {
+	t.Run("AfterPanic", func(t *testing.T) {
+		var myExecutor async.Executor
+
+		myExecutor.Autorun(myExecutor.Run)
+
+		ok := false
+
+		myExecutor.Spawn(async.Block(
+			async.Defer(func(co *async.Coroutine) async.Result {
+				co.RecoverFunc(func(v any) bool { return v == 42 })
+				return co.End()
+			}),
+			async.Defer(async.Block(
+				async.Spawn(async.End()),
+				async.Do(func() { ok = true }),
+			)),
+			async.Panic(42),
+		))
+
+		if !ok {
+			t.Fatal("Spawn(t) should not unwind when t doesn't panic.")
+		}
+	})
+}
+
 func TestSleep(t *testing.T) {
 	t.Run("NonCancelable", func(t *testing.T) {
 		var wg sync.WaitGroup // For keeping track of goroutines.
