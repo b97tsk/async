@@ -23,7 +23,7 @@ const (
 	doBreak
 	doContinue
 	doReturn
-	doRaise // Exit or panic.
+	doUnwind // Exit or panic.
 )
 
 const (
@@ -189,7 +189,7 @@ func (co *Coroutine) run() (suspended bool) {
 
 			if !ps.Try(func() { ok = guard() }) {
 				co.flag |= flagPanicking
-				co.task = (*Coroutine).raise
+				co.task = (*Coroutine).unwind
 				ok = true
 			}
 
@@ -253,7 +253,7 @@ func (co *Coroutine) run() (suspended bool) {
 			co.flag &^= flagResumed | flagCleanup
 
 			if co.Panicking() {
-				res = co.raise()
+				res = co.unwind()
 			}
 
 			controllers := co.controllers
@@ -349,7 +349,7 @@ func (co *Coroutine) run() (suspended bool) {
 		if parent != nil {
 			parent.flag |= flagPanicking
 			parent.guard = nil
-			parent.task = (*Coroutine).raise
+			parent.task = (*Coroutine).unwind
 			parent.ps = append(parent.ps, co.ps...)
 			parent.Resume()
 		} else {
@@ -402,7 +402,7 @@ func (co *Coroutine) clearCleanups() {
 	co.cleanups = cleanups[:0]
 	if !ok {
 		co.flag |= flagPanicking
-		co.task = (*Coroutine).raise
+		co.task = (*Coroutine).unwind
 	}
 }
 
@@ -415,7 +415,7 @@ func (child *childCoroutineCleanup) Cleanup() {
 		co.guard = nil
 		if co.flag&flagSoftYield == 0 {
 			co.flag |= flagExiting
-			co.task = (*Coroutine).raise
+			co.task = (*Coroutine).unwind
 		}
 		co.run()
 	}
@@ -792,21 +792,21 @@ func (co *Coroutine) Return() Result {
 // All deferred tasks will be run before co exits.
 func (co *Coroutine) Exit() Result {
 	co.flag |= flagExiting
-	return Result{action: doRaise}
+	return Result{action: doUnwind}
 }
 
 func (co *Coroutine) cancel() Result {
 	co.flag |= flagExiting | flagCanceled
-	return Result{action: doRaise}
+	return Result{action: doUnwind}
 }
 
 func (co *Coroutine) panic() Result {
 	co.flag |= flagPanicking
-	return Result{action: doRaise}
+	return Result{action: doUnwind}
 }
 
-func (co *Coroutine) raise() Result {
-	return Result{action: doRaise}
+func (co *Coroutine) unwind() Result {
+	return Result{action: doUnwind}
 }
 
 // Panic returns a [Result] that will cause co to behave as there's a panic.
@@ -818,7 +818,7 @@ func (co *Coroutine) Panic(v any) Result {
 	}
 	co.ps.Push(v, nil)
 	co.flag |= flagPanicking
-	return Result{action: doRaise}
+	return Result{action: doUnwind}
 }
 
 // PanicWithStackTrace returns a [Result] that will cause co to behave as
@@ -832,7 +832,7 @@ func (co *Coroutine) PanicWithStackTrace(v any, stacktrace []byte) Result {
 	}
 	co.ps.Push(v, stacktrace)
 	co.flag |= flagPanicking
-	return Result{action: doRaise}
+	return Result{action: doUnwind}
 }
 
 type controllerKind int8
@@ -862,7 +862,7 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 	switch c.kind {
 	case funcController:
 		switch res.action {
-		case doEnd, doReturn, doRaise:
+		case doEnd, doReturn, doUnwind:
 			if !co.Panicking() && len(co.ps) > c.poff {
 				// Discard recovered panic values.
 				clear(co.ps[c.poff:])
@@ -875,10 +875,10 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				co.defers = co.defers[:i]
 				return co.Transition(t)
 			}
-			raise := co.flag&(flagExiting|flagPanicking) != 0
+			unwind := co.flag&(flagExiting|flagPanicking) != 0
 			co.flag |= c.flag
-			if raise {
-				return co.raise()
+			if unwind {
+				return co.unwind()
 			}
 			return co.End()
 		case doBreak, doContinue:
@@ -1194,8 +1194,8 @@ func actionToTask(action action) Task {
 		return (*Coroutine).Continue
 	case doReturn:
 		return (*Coroutine).Return
-	case doRaise:
-		return (*Coroutine).raise
+	case doUnwind:
+		return (*Coroutine).unwind
 	default:
 		panic("async: internal error: unexpected action")
 	}
