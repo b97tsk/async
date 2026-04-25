@@ -79,6 +79,7 @@ type Coroutine struct {
 	guard       func() bool
 	task        Task
 	deps        map[Event]struct{}
+	children    map[*Coroutine]struct{}
 	cleanups    []Cleanup
 	defers      []Task
 	controllers []controller
@@ -195,6 +196,8 @@ const (
 	panicked
 )
 
+func and(a, b bool) bool { return a && b }
+
 func (co *Coroutine) run() status {
 	var res Result
 
@@ -226,7 +229,7 @@ func (co *Coroutine) run() status {
 
 		co.clearDeps()
 
-		if ok := co.clearCleanups(); !ok {
+		if ok := and(co.clearChildren(), co.childnum != 0 || co.clearCleanups()); !ok {
 			co.flag |= flagPanicking
 			co.task = (*Coroutine).unwind
 		}
@@ -268,7 +271,7 @@ func (co *Coroutine) run() status {
 
 			co.clearDeps()
 
-			if ok := co.clearCleanups(); !ok {
+			if ok := and(co.clearChildren(), co.childnum != 0 || co.clearCleanups()); !ok {
 				co.flag |= flagPanicking
 				if res.action != doUnwind {
 					res = co.unwind()
@@ -362,9 +365,7 @@ func (co *Coroutine) run() status {
 
 	parent := co.parent
 	if parent != nil {
-		if i := slices.Index(parent.cleanups, Cleanup((*childCoroutineCleanup)(co))); i != -1 {
-			parent.cleanups = slices.Delete(parent.cleanups, i, i+1)
-		}
+		delete(parent.children, co)
 		parent.childnum--
 		if parent.childnum == 0 && parent.flag&flagCleanup != 0 {
 			parent.Resume()
@@ -386,6 +387,9 @@ func (co *Coroutine) run() status {
 	if len(co.deps) != 0 {
 		panic("async: internal error: deps did not clear")
 	}
+	if len(co.children) != 0 {
+		panic("async: internal error: child coroutines did not clear")
+	}
 	if len(co.cleanups) != 0 {
 		panic("async: internal error: cleanups did not clear")
 	}
@@ -396,7 +400,7 @@ func (co *Coroutine) run() status {
 		panic("async: internal error: controllers did not clear")
 	}
 	if co.childnum != 0 {
-		panic("async: internal error: child coroutines did not clear")
+		panic("async: internal error: child coroutines are still running")
 	}
 
 	var status status
@@ -420,6 +424,25 @@ func (co *Coroutine) clearDeps() {
 	}
 }
 
+func (co *Coroutine) clearChildren() bool {
+	ok := true
+	children := co.children
+	for child := range children {
+		child.flag |= flagCanceled
+		if child.flag&(flagSoftYield|flagHardYield) != flagHardYield {
+			child.guard = nil
+			if child.flag&flagSoftYield == 0 {
+				child.flag |= flagExiting
+				child.task = (*Coroutine).unwind
+			}
+			status := child.run()
+			ok = ok && status != panicked
+		}
+	}
+	clear(children)
+	return ok
+}
+
 func (co *Coroutine) clearCleanups() bool {
 	ok := true
 	cleanups := co.cleanups
@@ -433,21 +456,6 @@ func (co *Coroutine) clearCleanups() bool {
 	clear(cleanups)
 	co.cleanups = cleanups[:0]
 	return ok
-}
-
-type childCoroutineCleanup Coroutine
-
-func (child *childCoroutineCleanup) Cleanup() {
-	co := (*Coroutine)(child)
-	co.flag |= flagCanceled
-	if co.flag&(flagSoftYield|flagHardYield) != flagHardYield {
-		co.guard = nil
-		if co.flag&flagSoftYield == 0 {
-			co.flag |= flagExiting
-			co.task = (*Coroutine).unwind
-		}
-		co.run()
-	}
 }
 
 // Weight returns the weight of co.
@@ -533,6 +541,8 @@ type CleanupFunc func()
 func (f CleanupFunc) Cleanup() { f() }
 
 // Cleanup adds something to clean up when co resumes or finishes a [Task].
+//
+// Note that cleanups run after all child coroutines, if any, are completed.
 func (co *Coroutine) Cleanup(c Cleanup) {
 	if c == nil {
 		return
@@ -541,6 +551,8 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 }
 
 // CleanupFunc adds a function call when co resumes or finishes a [Task].
+//
+// Note that cleanups run after all child coroutines, if any, are completed.
 func (co *Coroutine) CleanupFunc(f func()) {
 	if f == nil {
 		return
@@ -619,7 +631,12 @@ func (co *Coroutine) Spawn(t Task) {
 	child := newCoroutine().init(co, co.executor, co.weight, t)
 	switch child.run() {
 	case suspended:
-		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))
+		children := co.children
+		if children == nil {
+			children = make(map[*Coroutine]struct{})
+			co.children = children
+		}
+		children[child] = struct{}{}
 	case panicked:
 		panic(dummy{}) // Stop current task.
 	}

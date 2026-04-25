@@ -423,46 +423,64 @@ func ExampleAwait_various() {
 
 	var sig1, sig2 async.Signal
 
-	myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-		co.CleanupFunc(func() { fmt.Println("A") })
-		co.Defer(async.Do(func() { fmt.Println("B") }))
-		co.Spawn(async.Block(
-			async.Defer(async.Do(func() { fmt.Println("C") })),
-			async.Await(&sig2), // Cancelable (exit when canceled).
-			async.Do(func() { fmt.Println("D") }),
-		))
-		co.Spawn(async.Block(
-			async.Defer(async.Do(func() { fmt.Println("E") })),
-			async.SoftAwait(&sig2), // Cancelable (resume when canceled).
-			async.Do(func() { fmt.Println("F") }),
-			async.SoftAwait(),
-		))
-		co.Spawn(async.Block(
-			async.Defer(async.Do(func() { fmt.Println("G") })),
-			async.HardAwait(&sig2), // Non-cancelable.
-			async.Do(func() { fmt.Println("H") }),
-			async.HardAwait(), // Awaits forever.
-		))
-		return co.Await(&sig1).End()
-	})
-
-	myExecutor.Spawn(async.Do(func() {
-		fmt.Println("notifying sig1")
-		sig1.Notify()
-	}))
-	myExecutor.Spawn(async.Do(func() {
-		fmt.Println("notifying sig2")
-		sig2.Notify()
-	}))
+	for i := range 3 {
+		if i != 0 {
+			fmt.Println("--- SEPARATOR ---")
+		}
+		myExecutor.Spawn(func(co *async.Coroutine) async.Result {
+			co.CleanupFunc(func() { fmt.Println("A") })
+			co.Defer(async.Do(func() { fmt.Println("B") }))
+			switch i {
+			case 0:
+				co.Spawn(async.Block(
+					async.Defer(async.Do(func() { fmt.Println("C") })),
+					async.Await(&sig2), // Cancelable (exit when canceled).
+					async.Do(func() { fmt.Println("D") }),
+				))
+			case 1:
+				co.Spawn(async.Block(
+					async.Defer(async.Do(func() { fmt.Println("C") })),
+					async.SoftAwait(&sig2), // Cancelable (resume when canceled).
+					async.Do(func() { fmt.Println("D") }),
+					async.SoftAwait(),
+				))
+			case 2:
+				co.Spawn(async.Block(
+					async.Defer(async.Do(func() { fmt.Println("C") })),
+					async.HardAwait(&sig2), // Non-cancelable.
+					async.Do(func() { fmt.Println("D") }),
+					async.HardAwait(), // Awaits forever.
+				))
+			}
+			return co.Await(&sig1).End()
+		})
+		myExecutor.Spawn(async.Do(func() {
+			fmt.Println("notifying sig1")
+			sig1.Notify()
+		}))
+		myExecutor.Spawn(async.Do(func() {
+			fmt.Println("notifying sig2")
+			sig2.Notify()
+		}))
+	}
 
 	// Output:
 	// notifying sig1
-	// F
-	// E
 	// C
 	// A
+	// B
 	// notifying sig2
-	// H
+	// --- SEPARATOR ---
+	// notifying sig1
+	// D
+	// C
+	// A
+	// B
+	// notifying sig2
+	// --- SEPARATOR ---
+	// notifying sig1
+	// notifying sig2
+	// D
 }
 
 // This example demonstrates how to run a block of tasks.

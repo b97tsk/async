@@ -33,6 +33,26 @@ func TestSpawn(t *testing.T) {
 			t.Fatal("Spawn(t) should not unwind when t doesn't panic.")
 		}
 	})
+	t.Run("NoAwait", func(t *testing.T) {
+		var myExecutor async.Executor
+
+		myExecutor.Autorun(myExecutor.Run)
+
+		myExecutor.Spawn(async.Block(
+			async.Defer(func(co *async.Coroutine) async.Result {
+				co.RecoverFunc(func(v any) bool { return v == 42 })
+				return co.End()
+			}),
+			func(co *async.Coroutine) async.Result {
+				co.Spawn(async.Block(
+					async.Defer(async.Panic(42)),
+					async.Await(),
+				))
+				return co.End() // No awaiting here.
+			},
+			async.Do(func() { t.Error("co.Spawn(t) did not unwind when t panics.") }),
+		))
+	})
 }
 
 func TestSleep(t *testing.T) {
