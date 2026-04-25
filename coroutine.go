@@ -69,7 +69,7 @@ type Coroutine struct {
 	_ noCopy
 
 	flag        uint16
-	level       uint16
+	depth       uint16
 	childnum    uint32
 	weight      Weight
 	parent      *Coroutine
@@ -114,10 +114,22 @@ func freeCoroutine(co *Coroutine) {
 	}
 }
 
-func (co *Coroutine) init(l uint16, w Weight, e *Executor, t Task) *Coroutine {
+func (co *Coroutine) init(parent *Coroutine, e *Executor, w Weight, t Task) *Coroutine {
+	var depth uint16
+	if parent != nil {
+		depth = parent.depth + 1
+		if depth == 0 {
+			panic("async: depth overflow")
+		}
+		if parent.childnum+1 == 0 {
+			panic("async: too many child coroutines")
+		}
+		parent.childnum++
+	}
 	co.flag = flagResumed
-	co.level = l
+	co.depth = depth
 	co.weight = w
+	co.parent = parent
 	co.executor = e
 	co.task = t
 	return co
@@ -137,7 +149,7 @@ func (co *Coroutine) less(other *Coroutine) bool {
 	if c := compare(co.weight, other.weight); c != 0 {
 		return c == +1
 	}
-	return co.level < other.level
+	return co.depth < other.depth
 }
 
 // Resume resumes co.
@@ -587,18 +599,7 @@ func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
 // too. In such case, the parent coroutine stays suspended until all its child
 // coroutines complete.
 func (co *Coroutine) Spawn(t Task) {
-	level := co.level + 1
-	if level == 0 {
-		panic("async: too many levels")
-	}
-	if co.childnum+1 == 0 {
-		panic("async: too many child coroutines")
-	}
-
-	child := newCoroutine().init(level, co.weight, co.executor, t)
-	child.parent = co
-	co.childnum++
-
+	child := newCoroutine().init(co, co.executor, co.weight, t)
 	switch suspended := child.run(); {
 	case suspended:
 		co.cleanups = append(co.cleanups, (*childCoroutineCleanup)(child))

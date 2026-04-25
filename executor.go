@@ -13,12 +13,12 @@ import "sync"
 //
 // The internal queue is a priority queue.
 // Coroutines added in the queue are sorted by their weights.
-// Coroutines with the same weight are sorted by their levels
-// (child coroutines have one level higher than their parent ones).
-// Coroutines with the same weight and level are sorted by their arrival
+// Coroutines with the same weight are sorted by their depths
+// (child coroutines have one depth deeper than their parent ones).
+// Coroutines with the same weight and depth are sorted by their arrival
 // order (FIFO).
 // Popping the queue removes the first coroutine with the highest weight or
-// the least level.
+// the least depth.
 //
 // Manually calling the Run method is usually not desired.
 // One would instead use the Autorun method to set up an autorun function to
@@ -105,7 +105,7 @@ func (e *Executor) SpawnWeightedBlocking(w Weight, t Task) {
 func (e *Executor) spawn(wg *sync.WaitGroup, w Weight, t Task) {
 	var autorun func()
 
-	co := newCoroutine().init(0, w, e, t)
+	co := newCoroutine().init(nil, e, w, t)
 
 	if wg != nil {
 		wg.Add(1)
