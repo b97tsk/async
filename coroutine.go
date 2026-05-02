@@ -1354,21 +1354,22 @@ func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
 	}
 }
 
-// A Goer is for spawning goroutines and keeping track of them.
+// A GoroutineTracker is for keeping track of goroutines.
 //
-// For go1.25 and later, a [sync.WaitGroup] would satisfy this interface.
-type Goer interface {
-	Go(f func())
+// A [sync.WaitGroup] would satisfy this interface.
+type GoroutineTracker interface {
+	Add(delta int)
+	Done()
 }
 
-// Go returns a [Task] that uses g to spawn a goroutine to run f, which takes
+// Go returns a [Task] that spawns a goroutine to run f, which takes
 // a [context.Context] as argument that will be canceled when the running
 // coroutine or ctx is canceled.
 // The return value of f, a [Task], if non-nil, will be run after f returns.
 // To cancel Go, f must return a [Task] that terminates Go, such as [Exit].
 // If f panics, Go propagates it.
 // Go completes only when everything is settled.
-func Go(ctx context.Context, g Goer, f func(ctx context.Context) Task) Task {
+func Go(ctx context.Context, g GoroutineTracker, f func(ctx context.Context) Task) Task {
 	return func(co *Coroutine) Result {
 		ctx := ctx
 		if !co.NonCancelable() {
@@ -1405,15 +1406,17 @@ func Go(ctx context.Context, g Goer, f func(ctx context.Context) Task) Task {
 			}
 		}
 		e, w := co.Executor(), co.Weight()
-		g.Go(func() {
+		g.Add(1)
+		go func() {
 			defer func() {
+				defer g.Done()
 				if v := recover(); v != nil {
 					state.v, state.s = v, debug.Stack()
 				}
 				e.SpawnWeighted(w, t)
 			}()
 			state.t = f(ctx)
-		})
+		}()
 		return co.SoftAwait(&state).Then(t)
 	}
 }
@@ -1421,7 +1424,7 @@ func Go(ctx context.Context, g Goer, f func(ctx context.Context) Task) Task {
 // Sleep returns a [Task] that awaits until a period of time elapses, and then
 // ends.
 // When ctx is canceled, the coroutine that runs Sleep exits.
-func Sleep(ctx context.Context, g Goer, d time.Duration) Task {
+func Sleep(ctx context.Context, g GoroutineTracker, d time.Duration) Task {
 	return Go(ctx, g, func(ctx context.Context) Task {
 		select {
 		case <-ctx.Done():
