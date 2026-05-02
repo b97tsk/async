@@ -1066,11 +1066,12 @@ func Block(s ...Task) Task {
 	case 2:
 		return s[0].Then(s[1])
 	}
+	z := slices.Clone(s)
 	return func(co *Coroutine) Result {
 		return Result{
 			action:     doTransition,
-			task:       must(s[0]),
-			controller: controller{kind: blockController, tasks: s[1:]},
+			task:       must(z[0]),
+			controller: controller{kind: blockController, tasks: z[1:]},
 		}
 	}
 }
