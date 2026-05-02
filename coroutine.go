@@ -1423,14 +1423,23 @@ func Go(ctx context.Context, g GoroutineTracker, f func(ctx context.Context) Tas
 
 // Sleep returns a [Task] that awaits until a period of time elapses, and then
 // ends.
-// When ctx is canceled, the coroutine that runs Sleep exits.
-func Sleep(ctx context.Context, g GoroutineTracker, d time.Duration) Task {
-	return Go(ctx, g, func(ctx context.Context) Task {
-		select {
-		case <-ctx.Done():
-			return Exit()
-		case <-time.After(d):
-			return nil
-		}
-	})
+func Sleep(d time.Duration, g GoroutineTracker) Task {
+	return func(co *Coroutine) Result {
+		var sig Signal
+		g.Add(1)
+		e, w := co.Executor(), co.Weight()
+		tm := time.AfterFunc(d, func() {
+			defer g.Done()
+			e.SpawnWeighted(w, func(co *Coroutine) Result {
+				sig.Notify()
+				return co.End()
+			})
+		})
+		co.CleanupFunc(func() {
+			if tm.Stop() {
+				g.Done()
+			}
+		})
+		return co.Await(&sig).End()
+	}
 }

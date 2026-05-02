@@ -15,27 +15,10 @@ func TestSignal(t *testing.T) {
 
 	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
 
-	sleep := func(d time.Duration) async.Task {
-		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
-			wg.Add(1) // Keep track of timers too.
-			tm := time.AfterFunc(d, func() {
-				defer wg.Done()
-				myExecutor.Spawn(async.Do(sig.Notify))
-			})
-			co.CleanupFunc(func() {
-				if tm.Stop() {
-					wg.Done()
-				}
-			})
-			return co.Await(&sig).End()
-		}
-	}
-
 	var sig async.Signal
 
 	myExecutor.Spawn(async.LoopN(4, async.Block(
-		sleep(100*time.Millisecond),
+		async.Sleep(100*time.Millisecond, &wg),
 		async.Do(sig.Notify),
 	)))
 
@@ -43,7 +26,7 @@ func TestSignal(t *testing.T) {
 		for i := range 100 {
 			t := async.Select(
 				async.Await(&sig),
-				sleep(time.Duration(4+i%5)*10*time.Millisecond),
+				async.Sleep(time.Duration(4+i%5)*10*time.Millisecond, &wg),
 			)
 			if !yield(t) {
 				return

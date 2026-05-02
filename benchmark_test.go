@@ -39,41 +39,63 @@ func BenchmarkAsyncSleep(b *testing.B) {
 
 	b.ReportAllocs()
 
+	sleep := func(d time.Duration) async.Task {
+		return async.Sleep(d, &wg)
+	}
+
 	for b.Loop() {
-		myExecutor.SpawnBlocking(async.Sleep(context.Background(), &wg, 0))
+		myExecutor.SpawnBlocking(sleep(0))
 	}
 
 	wg.Wait()
 }
 
-func BenchmarkTimeAfterFunc(b *testing.B) {
+func BenchmarkAsyncGoWithContext(b *testing.B) {
 	var wg sync.WaitGroup // For keeping track of goroutines.
 
 	var myExecutor async.Executor
 
 	myExecutor.Autorun(myExecutor.Run)
 
+	b.ReportAllocs()
+
 	sleep := func(d time.Duration) async.Task {
-		return func(co *async.Coroutine) async.Result {
-			var sig async.Signal
-			wg.Add(1)
-			tm := time.AfterFunc(d, func() {
-				defer wg.Done()
-				myExecutor.Spawn(func(co *async.Coroutine) async.Result {
-					sig.Notify()
-					return co.End()
-				})
-			})
-			co.CleanupFunc(func() {
-				if tm.Stop() {
-					wg.Done()
-				}
-			})
-			return co.Await(&sig).End()
-		}
+		ctx, _ := context.WithTimeout(context.Background(), d)
+		return async.Go(ctx, &wg, func(ctx context.Context) async.Task {
+			<-ctx.Done()
+			return nil
+		})
 	}
 
+	for b.Loop() {
+		myExecutor.SpawnBlocking(sleep(0))
+	}
+
+	wg.Wait()
+}
+
+func BenchmarkAsyncGoWithTimeAfter(b *testing.B) {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
 	b.ReportAllocs()
+
+	sleep := func(d time.Duration) async.Task {
+		return async.Go(
+			context.Background(), &wg,
+			func(ctx context.Context) async.Task {
+				select {
+				case <-ctx.Done():
+					return async.Exit()
+				case <-time.After(d):
+					return nil
+				}
+			},
+		)
+	}
 
 	for b.Loop() {
 		myExecutor.SpawnBlocking(sleep(0))

@@ -1056,7 +1056,7 @@ func ExampleMergeSeq() {
 		for n := 1; n <= 6; n++ {
 			d := time.Duration(n*100) * time.Millisecond
 			f := func() { fmt.Println(n) }
-			t := async.Sleep(context.Background(), &wg, d).Then(async.Do(f))
+			t := async.Sleep(d, &wg).Then(async.Do(f))
 			if !yield(t) {
 				return
 			}
@@ -1067,13 +1067,13 @@ func ExampleMergeSeq() {
 	fmt.Println("--- SEPARATOR ---")
 
 	myExecutor.Spawn(async.Select(
-		async.Sleep(context.Background(), &wg, 1000*time.Millisecond), // Cancel the following task after 1s.
+		async.Sleep(1000*time.Millisecond, &wg), // Cancel the following task after 1s.
 		async.MergeSeq(3, func(yield func(async.Task) bool) {
 			defer fmt.Println("done")
 			for n := 1; ; n++ { // Infinite loop.
 				d := time.Duration(n*100) * time.Millisecond
 				f := func() { fmt.Println(n) }
-				t := async.Sleep(context.Background(), &wg, d).Then(async.Do(f))
+				t := async.Sleep(d, &wg).Then(async.Do(f))
 				if !yield(t) {
 					return
 				}
@@ -1099,6 +1099,40 @@ func ExampleMergeSeq() {
 	// 5
 	// 6
 	// done
+}
+
+func ExampleGo() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
+
+	sleep := func(d time.Duration) async.Task { // No better than async.Sleep, but it works.
+		return async.Go(
+			context.Background(), &wg,
+			func(ctx context.Context) async.Task {
+				select {
+				case <-ctx.Done():
+					return async.Exit()
+				case <-time.After(d):
+					return nil
+				}
+			},
+		)
+	}
+
+	myExecutor.Spawn(async.Select(
+		sleep(100*time.Millisecond), // Cancel the following task after 100ms.
+		async.Block(
+			sleep(200*time.Millisecond),
+			async.Do(func() { fmt.Println("after 200ms") }),
+		),
+	))
+
+	wg.Wait()
+
+	// Output:
 }
 
 // This example demonstrates how async handles panics.
@@ -1162,7 +1196,7 @@ func Example_panicAndRecover() {
 			async.Defer(recover),
 			func(co *async.Coroutine) async.Result {
 				co.Spawn(async.Block(
-					async.Sleep(context.Background(), &wg, 100*time.Millisecond),
+					async.Sleep(100*time.Millisecond, &wg),
 					async.Do(func() { panic("A") }), // Panics after 100ms.
 				))
 				co.Spawn(async.Block(
