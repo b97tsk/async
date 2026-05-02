@@ -1414,7 +1414,7 @@ func Go(ctx context.Context, g GoroutineTracker, f func(ctx context.Context) Tas
 				if v := recover(); v != nil {
 					state.v, state.s = v, debug.Stack()
 				}
-				e.SpawnWeighted(w, t)
+				e.SpawnEx(w, t)
 			}()
 			state.t = f(ctx)
 		}()
@@ -1431,7 +1431,7 @@ func Sleep(d time.Duration, g GoroutineTracker) Task {
 		e, w := co.Executor(), co.Weight()
 		tm := time.AfterFunc(d, func() {
 			defer g.Done()
-			e.SpawnWeighted(w, func(co *Coroutine) Result {
+			e.SpawnEx(w, func(co *Coroutine) Result {
 				sig.Notify()
 				return co.End()
 			})

@@ -67,35 +67,35 @@ func (e *Executor) Run() {
 	ps.Repanic()
 }
 
-// Spawn creates a coroutine with default weight to work on t.
+// Spawn creates a coroutine with default weight, zero, to work on t.
 //
 // The coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
 // Spawn is safe for concurrent use.
 func (e *Executor) Spawn(t Task) {
-	e.SpawnWeighted(0, t)
+	e.SpawnEx(0, t)
 }
 
 // SpawnBlocking is like [Executor.Spawn] but also blocks the running goroutine
 // until t completes.
 func (e *Executor) SpawnBlocking(t Task) {
-	e.SpawnWeightedBlocking(0, t)
+	e.SpawnBlockingEx(0, t)
 }
 
-// SpawnWeighted creates a coroutine with weight w to work on t.
+// SpawnEx creates a coroutine with weight w to work on t.
 //
 // The coroutine is added in a queue. To run it, either call the Run method, or
 // call the Autorun method to set up an autorun function beforehand.
 //
-// SpawnWeighted is safe for concurrent use.
-func (e *Executor) SpawnWeighted(w Weight, t Task) {
+// SpawnEx is safe for concurrent use.
+func (e *Executor) SpawnEx(w Weight, t Task) {
 	e.spawn(nil, w, t)
 }
 
-// SpawnWeightedBlocking is like [Executor.SpawnWeighted] but also blocks
-// the running goroutine until t completes.
-func (e *Executor) SpawnWeightedBlocking(w Weight, t Task) {
+// SpawnBlockingEx is like [Executor.SpawnEx] but also blocks the running
+// goroutine until t completes.
+func (e *Executor) SpawnBlockingEx(w Weight, t Task) {
 	wg := waitGroupPool.Get().(*sync.WaitGroup)
 	e.spawn(wg, w, t)
 	wg.Wait()
