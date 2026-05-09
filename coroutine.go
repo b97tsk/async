@@ -85,7 +85,7 @@ type Coroutine struct {
 	controllers []controller
 }
 
-type Weight int64
+type Weight int
 
 var coroutinePool = sync.Pool{
 	New: func() any { return new(Coroutine) },

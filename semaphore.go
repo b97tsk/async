@@ -15,20 +15,22 @@ import (
 type Semaphore struct {
 	_ noCopy
 
-	size    Weight
-	cur     Weight
+	size    Weight64
+	cur     Weight64
 	waiters []*waiter
 }
 
+type Weight64 int64
+
 // NewSemaphore creates a new weighted semaphore with the given maximum
 // combined weight.
-func NewSemaphore(n Weight) *Semaphore {
+func NewSemaphore(n Weight64) *Semaphore {
 	return &Semaphore{size: n}
 }
 
 // Acquire returns a [Task] that awaits until a weight of n is acquired from
 // the semaphore, and then ends.
-func (s *Semaphore) Acquire(n Weight) Task {
+func (s *Semaphore) Acquire(n Weight64) Task {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
 	}
@@ -54,7 +56,7 @@ func (s *Semaphore) Acquire(n Weight) Task {
 //
 // Without proper synchronization, one should only call this method in a [Task]
 // function.
-func (s *Semaphore) TryAcquire(n Weight) bool {
+func (s *Semaphore) TryAcquire(n Weight64) bool {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
 	}
@@ -68,7 +70,7 @@ func (s *Semaphore) TryAcquire(n Weight) bool {
 // Release releases the semaphore with a weight of n.
 //
 // One should only call this method in a [Task] function.
-func (s *Semaphore) Release(n Weight) {
+func (s *Semaphore) Release(n Weight64) {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
 	}
@@ -98,7 +100,7 @@ func (s *Semaphore) notifyWaiters() {
 type waiter struct {
 	co       *Coroutine
 	s        *Semaphore
-	n        Weight
+	n        Weight64
 	acquired bool
 }
 
