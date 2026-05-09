@@ -19,7 +19,7 @@ func TestSignal(t *testing.T) {
 
 	myExecutor.Spawn(async.LoopN(4, async.Block(
 		async.Sleep(100*time.Millisecond, &wg),
-		async.Do(sig.Notify),
+		async.Notify(&sig),
 	)))
 
 	myExecutor.Spawn(async.MergeSeq(10, func(yield func(async.Task) bool) {

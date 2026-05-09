@@ -1055,6 +1055,14 @@ func HardAwait(ev ...Event) Task {
 	}
 }
 
+// Notify returns a [Task] that notifies ev, and then ends.
+func Notify(ev Event) Task {
+	return func(co *Coroutine) Result {
+		ev.Notify()
+		return co.End()
+	}
+}
+
 // Block returns a [Task] that runs each of the given tasks in sequence.
 // When one task ends, Block runs another.
 func Block(s ...Task) Task {
@@ -1431,10 +1439,7 @@ func Sleep(d time.Duration, g GoroutineTracker) Task {
 		e, w := co.Executor(), co.Weight()
 		tm := time.AfterFunc(d, func() {
 			defer g.Done()
-			e.SpawnEx(w, func(co *Coroutine) Result {
-				sig.Notify()
-				return co.End()
-			})
+			e.SpawnEx(w, Notify(&sig))
 		})
 		co.CleanupFunc(func() {
 			if tm.Stop() {
@@ -1454,10 +1459,7 @@ func AfterContext(ctx context.Context, g GoroutineTracker) Task {
 		e, w := co.Executor(), co.Weight()
 		stop := context.AfterFunc(ctx, func() {
 			defer g.Done()
-			e.SpawnEx(w, func(co *Coroutine) Result {
-				sig.Notify()
-				return co.End()
-			})
+			e.SpawnEx(w, Notify(&sig))
 		})
 		co.CleanupFunc(func() {
 			if stop() {

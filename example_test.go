@@ -200,11 +200,11 @@ func Example_conditional() {
 
 	inc := func(i int) int { return i + 1 }
 
-	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Notify(s3)) // Nothing happens.
 	myExecutor.Spawn(async.Do(func() { s1.Update(inc) }))
-	myExecutor.Spawn(async.Do(func() { s3.Notify() }))
+	myExecutor.Spawn(async.Notify(s3))
 	myExecutor.Spawn(async.Do(func() { s2.Update(inc) }))
-	myExecutor.Spawn(async.Do(func() { s3.Notify() })) // Nothing happens.
+	myExecutor.Spawn(async.Notify(s3)) // Nothing happens.
 
 	// Output:
 	// 3
@@ -314,7 +314,7 @@ func ExampleExecutor_SpawnBlocking() {
 		wg.Go(func() {
 			time.Sleep(100 * time.Millisecond)
 			fmt.Println("after 100ms")
-			myExecutor.Spawn(async.Do(sig.Notify))
+			myExecutor.Spawn(async.Notify(&sig))
 		})
 		return co.Await(&sig).End()
 	})
@@ -829,8 +829,8 @@ func ExampleNonCancelable() {
 			async.Do(func() { fmt.Println("after Select") }),
 		))
 
-		myExecutor.Spawn(async.Do(sig1.Notify))
-		myExecutor.Spawn(async.Do(sig2.Notify))
+		myExecutor.Spawn(async.Notify(&sig1))
+		myExecutor.Spawn(async.Notify(&sig2))
 	}
 
 	{
@@ -851,8 +851,8 @@ func ExampleNonCancelable() {
 			async.Do(func() { fmt.Println("after Select") }),
 		))
 
-		myExecutor.Spawn(async.Do(sig1.Notify))
-		myExecutor.Spawn(async.Do(sig2.Notify))
+		myExecutor.Spawn(async.Notify(&sig1))
+		myExecutor.Spawn(async.Notify(&sig2))
 	}
 
 	{
@@ -878,7 +878,7 @@ func ExampleNonCancelable() {
 				}),
 				async.Do(func() { fmt.Println("after LoopN") }),
 			))
-			myExecutor.Spawn(async.Do(sig1.Notify))
+			myExecutor.Spawn(async.Notify(&sig1))
 		}
 	}
 

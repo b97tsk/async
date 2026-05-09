@@ -47,7 +47,7 @@ func TestSemaphore(t *testing.T) {
 			t.Fatal("TryAcquire should not succeed when there are waiters.")
 		}
 
-		myExecutor.Spawn(async.Do(sig.Notify))
+		myExecutor.Spawn(async.Notify(&sig))
 
 		if !sema.TryAcquire(1) {
 			t.Fatal("TryAcquire did not succeed when there are no waiters.")

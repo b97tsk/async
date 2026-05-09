@@ -5,6 +5,9 @@ package async
 // The following types implement Event: [Signal] and [State].
 // Any type that embeds [Signal] also implements Event, e.g. [State].
 type Event interface {
+	// Notify resumes any coroutine that is watching the event.
+	Notify()
+
 	addListener(co *Coroutine)
 	removeListener(co *Coroutine)
 }

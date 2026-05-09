@@ -62,7 +62,7 @@ func ExampleSemaphore_cancel() {
 
 		wg.Go(func() {
 			time.Sleep(100 * time.Millisecond)
-			myExecutor.Spawn(async.Do(sig.Notify))
+			myExecutor.Spawn(async.Notify(&sig))
 		})
 
 		return co.Await(&sig).End()
