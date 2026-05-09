@@ -8,9 +8,6 @@ import (
 // Semaphore provides a way to bound asynchronous access to a resource.
 // The callers can request access with a given weight.
 //
-// Note that this Semaphore type does not provide backpressure for spawning
-// a lot of tasks. One should instead look for a sync implementation.
-//
 // A Semaphore must not be shared by more than one [Executor].
 type Semaphore struct {
 	_ noCopy
@@ -43,7 +40,7 @@ func (s *Semaphore) Acquire(n Weight64) Task {
 			return co.Yield() // Impossible to success.
 		}
 		w := waiterPool.Get().(*waiter)
-		w.co, w.s, w.n = co, s, n
+		w.sm, w.co, w.n = s, co, n
 		s.waiters = append(s.waiters, w)
 		co.Cleanup(w)
 		return co.Await().End()
@@ -53,9 +50,6 @@ func (s *Semaphore) Acquire(n Weight64) Task {
 // TryAcquire acquires the semaphore with a weight of n without blocking.
 // On success, returns true.
 // On failure, returns false and leaves the semaphore unchanged.
-//
-// Without proper synchronization, one should only call this method in a [Task]
-// function.
 func (s *Semaphore) TryAcquire(n Weight64) bool {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
@@ -68,8 +62,6 @@ func (s *Semaphore) TryAcquire(n Weight64) bool {
 }
 
 // Release releases the semaphore with a weight of n.
-//
-// One should only call this method in a [Task] function.
 func (s *Semaphore) Release(n Weight64) {
 	if n < 0 {
 		panic("async(Semaphore): negative weight")
@@ -97,17 +89,9 @@ func (s *Semaphore) notifyWaiters() {
 	s.waiters = slices.Delete(s.waiters, 0, n)
 }
 
-type waiter struct {
-	co       *Coroutine
-	s        *Semaphore
-	n        Weight64
-	acquired bool
-}
-
-func (w *waiter) Cleanup() {
+func (s *Semaphore) cancel(w *waiter) {
 	switch {
 	case !w.acquired:
-		s := w.s
 		if i := slices.Index(s.waiters, w); i != -1 {
 			s.waiters = slices.Delete(s.waiters, i, i+1)
 			if i == 0 && s.size > s.cur {
@@ -115,10 +99,90 @@ func (w *waiter) Cleanup() {
 			}
 		}
 	case w.co.Exiting():
-		s, n := w.s, w.n
-		s.cur -= n
+		s.cur -= w.n
 		s.notifyWaiters()
 	}
+}
+
+// A Mutex is a mutual exclusion lock.
+// The zero value for a Mutex is an unlocked mutex.
+//
+// A Mutex must not be shared by more than one [Executor].
+type Mutex struct {
+	_ noCopy
+
+	locked  bool
+	waiters []*waiter
+}
+
+// Lock returns a [Task] that locks m.
+// If the lock is already in use, the calling coroutine
+// awaits until the mutex is available.
+func (m *Mutex) Lock() Task {
+	return func(co *Coroutine) Result {
+		if !m.locked && len(m.waiters) == 0 {
+			m.locked = true
+			return co.End()
+		}
+		w := waiterPool.Get().(*waiter)
+		w.sm, w.co = m, co
+		m.waiters = append(m.waiters, w)
+		co.Cleanup(w)
+		return co.Await().End()
+	}
+}
+
+// TryLock tries to lock m and reports whether it succeeded.
+func (m *Mutex) TryLock() bool {
+	success := !m.locked && len(m.waiters) == 0
+	if success {
+		m.locked = true
+	}
+	return success
+}
+
+// Unlock unlocks m.
+// Unlock panics if m isn't locked.
+func (m *Mutex) Unlock() {
+	if !m.locked {
+		panic("async(Mutex): unlock of unlocked mutex")
+	}
+	m.locked = false
+	m.notifyWaiters()
+}
+
+func (m *Mutex) notifyWaiters() {
+	if len(m.waiters) == 0 {
+		return
+	}
+	w := m.waiters[0]
+	w.acquired = true
+	w.co.Resume()
+	m.locked = true
+	m.waiters = slices.Delete(m.waiters, 0, 1)
+}
+
+func (m *Mutex) cancel(w *waiter) {
+	switch {
+	case !w.acquired:
+		if i := slices.Index(m.waiters, w); i != -1 {
+			m.waiters = slices.Delete(m.waiters, i, i+1)
+		}
+	case w.co.Exiting():
+		m.locked = false
+		m.notifyWaiters()
+	}
+}
+
+type waiter struct {
+	sm       interface{ cancel(w *waiter) }
+	co       *Coroutine
+	n        Weight64
+	acquired bool
+}
+
+func (w *waiter) Cleanup() {
+	w.sm.cancel(w)
 	*w = waiter{}
 	waiterPool.Put(w)
 }
