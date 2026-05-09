@@ -27,7 +27,7 @@ func (s *State[T]) Get() T {
 
 // Set updates the value of s and resumes any coroutine that is watching s.
 //
-// One should only call this method in a [Task] function.
+// One must call this method in a [Task] function.
 func (s *State[T]) Set(v T) {
 	s.value = v
 	s.Notify()
@@ -36,7 +36,7 @@ func (s *State[T]) Set(v T) {
 // Update sets the value of s to f(s.Get()) and resumes any coroutine that
 // is watching s.
 //
-// One should only call this method in a [Task] function.
+// One must call this method in a [Task] function.
 func (s *State[T]) Update(f func(v T) T) {
 	s.Set(f(s.value))
 }

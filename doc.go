@@ -51,22 +51,6 @@
 // writing async code. The experience now feels similar to that of writing sync
 // code.
 //
-// # Spawning Async Tasks vs. Passing Data Over Go Channels
-//
-// It's not recommended to have channel operations in an async [Task] for
-// a [Coroutine] to do, since they tend to block.
-// For an [Executor], if one coroutine blocks, no other coroutines can run.
-// So instead of passing data around, one would just handle data at places
-// where data are available.
-// Async tasks are quite flexible and composable. One can even build a state
-// machine across goroutine boundaries, which isn't something channels are
-// qualified to do. Async tasks are better building blocks than channels.
-//
-// One of the advantages of passing data over channels is to be able to avoid
-// allocation. Unfortunately, async tasks always escape to heap.
-// Any variable they capture also escapes to heap. One should stay alert and
-// take measures in hot spots, like repeatedly using a same task.
-//
 // # The Essentiality of Structured Concurrency
 //
 // Async encourages non-blocking programming, which makes structured concurrency
@@ -88,19 +72,24 @@
 // are child coroutines.
 //
 // Child coroutines are Task-scoped and, therefore, cancelable.
-// When a [Task] completes, all child coroutines spawned in it are canceled.
+// When a coroutine resumes, or finishes a [Task], all spawned child coroutines
+// are canceled.
 //
 // Conversely, root coroutines are not cancelable.
 // One must cooperatively tell a root coroutine to exit.
 // Though, it's possible to just let them rot in the background. The Go runtime
 // would happily garbage collect them when there are no references to them.
 //
-// By default, canceled child coroutines cannot yield.
-// All yield points are treated like exit points.
+// When a child coroutine is canceled, it runs to completion with all yield
+// points treated like exit points.
 // However, within a [NonCancelable] context, a canceled child coroutine is
 // allowed to yield, which would correspondingly cause its parent coroutine to
-// yield, too. In such case, the parent coroutine stays suspended until all
-// its child coroutines complete.
+// yield, too. In such case, the parent coroutine stays suspended until all its
+// child coroutines are completed.
+//
+// Further more, a (child) coroutine can also perform hard yields at any time.
+// A hard yield is non-cancelable and does not require a [NonCancelable]
+// context.
 //
 // # Panic Propagation
 //
@@ -110,6 +99,20 @@
 //
 // If a coroutine spawns multiple child coroutines and one of them panics
 // without recovering, the coroutine cancels other child coroutines.
-// Then, after all child coroutines complete, the coroutine propagates panics
-// to its parent coroutine, or its [Executor] if it's a root coroutine.
+// Then, after all child coroutines are completed, the coroutine propagates
+// panics to its parent coroutine, or its [Executor] if it's a root coroutine.
+//
+// # Coroutine Unwinding
+//
+// Coroutine unwinding is the process of removing structure controllers,
+// such as [Func], from the controller stack.
+// Deferred tasks are run in last-in-first-out (LIFO) order, hence, the running
+// coroutine may still have a chance to yield during the process of unwinding.
+//
+// Here is the list of operations that may cause a coroutine to unwind:
+//   - Returning: unstoppable, suspendable, [Func]-scoped;
+//   - Exiting: unstoppable, suspendable;
+//   - Panicking: stoppable with panic recovery, suspendable;
+//   - Canceled by parent (implies Exiting): unstoppable, suspendable with
+//     hard yields or [NonCancelable].
 package async

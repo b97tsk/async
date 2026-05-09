@@ -36,7 +36,7 @@ type Executor struct {
 // Autorun sets up an autorun function to calling the Run method automatically
 // whenever a coroutine is spawned or resumed.
 //
-// One must pass a function that calls the Run method.
+// One must pass a function that calls the Run method in the end.
 //
 // If f blocks, the Spawn method may block too.
 // The best practice is not to block.

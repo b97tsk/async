@@ -533,7 +533,7 @@ func (co *Coroutine) Watch(ev ...Event) {
 
 // Cleanup represents any type that carries a Cleanup method.
 // A Cleanup can be added to a coroutine in a [Task] function for making
-// an effect some time later when the coroutine resumes or finishes a [Task].
+// an effect some time later when the coroutine resumes, or finishes a [Task].
 type Cleanup interface {
 	Cleanup()
 }
@@ -544,7 +544,7 @@ type CleanupFunc func()
 // Cleanup implements the [Cleanup] interface.
 func (f CleanupFunc) Cleanup() { f() }
 
-// Cleanup adds something to clean up when co resumes or finishes a [Task].
+// Cleanup adds something to clean up when co resumes, or finishes a [Task].
 //
 // Note that cleanups run after all child coroutines, if any, are completed.
 func (co *Coroutine) Cleanup(c Cleanup) {
@@ -554,7 +554,7 @@ func (co *Coroutine) Cleanup(c Cleanup) {
 	co.cleanups = append(co.cleanups, c)
 }
 
-// CleanupFunc adds a function call when co resumes or finishes a [Task].
+// CleanupFunc adds a function call when co resumes, or finishes a [Task].
 //
 // Note that cleanups run after all child coroutines, if any, are completed.
 func (co *Coroutine) CleanupFunc(f func()) {
@@ -565,7 +565,7 @@ func (co *Coroutine) CleanupFunc(f func()) {
 }
 
 // Defer adds a [Task] for execution when returning from a [Func].
-// Deferred tasks are executed in last-in-first-out (LIFO) order.
+// Deferred tasks are run in last-in-first-out (LIFO) order.
 func (co *Coroutine) Defer(t Task) {
 	if t == nil {
 		return
@@ -622,15 +622,14 @@ func (co *Coroutine) RecoverFunc(f func(v any) bool) (v any) {
 //
 // Spawn runs t immediately. If t panics immediately, Spawn panics, too.
 //
-// Child coroutines, if not yet ended, are canceled when the parent one resumes
-// or finishes a [Task].
-// When a coroutine is canceled, it runs to completion with all yield points
-// treated like exit points.
+// Child coroutines, if not yet completed, are canceled when their parent one
+// resumes, or finishes a [Task].
+// That means that, the parent coroutine must yield, so that child coroutines
+// may live.
 //
-// However, within a [NonCancelable] context, a canceled coroutine is allowed
-// to yield, which would correspondingly cause its parent coroutine to yield,
-// too. In such case, the parent coroutine stays suspended until all its child
-// coroutines complete.
+// When a child coroutine is canceled, it runs to completion with all yield
+// points treated like exit points, except when the coroutine is performing
+// a hard yield, or running a [NonCancelable] task.
 func (co *Coroutine) Spawn(t Task) {
 	child := newCoroutine().init(co, co.executor, co.weight, t)
 	switch child.run() {
@@ -1152,7 +1151,7 @@ type intType interface {
 
 // Defer returns a [Task] that adds t for execution when returning from
 // a [Func].
-// Deferred tasks are executed in last-in-first-out (LIFO) order.
+// Deferred tasks are run in last-in-first-out (LIFO) order.
 func Defer(t Task) Task {
 	return func(co *Coroutine) Result {
 		co.Defer(t)
@@ -1262,8 +1261,8 @@ func resumeParent(co *Coroutine) Result {
 	return co.End()
 }
 
-// Join returns a [Task] that runs each of the given tasks in its own
-// child coroutine and awaits until all of them complete, and then ends.
+// Join returns a [Task] that runs each of the given tasks in its own child
+// coroutine and awaits until all of them are completed, and then ends.
 //
 // When passed no arguments, Join returns a [Task] that never ends.
 func Join(s ...Task) Task {
@@ -1325,7 +1324,7 @@ func Spawn(t Task) Task {
 }
 
 // MergeSeq returns a [Task] that runs each of the tasks from seq in its own
-// child coroutine concurrently until all of them complete, and then ends.
+// child coroutine concurrently until all of them are completed, and then ends.
 // The argument concurrency specifies the maximum number of tasks that can
 // run at the same time. If it is zero, no tasks will be run and MergeSeq
 // never ends. It may wrap around. The maximum value of concurrency is -1.

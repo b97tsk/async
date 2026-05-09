@@ -52,7 +52,7 @@ func (s *Signal) removeListener(co *Coroutine) {
 
 // Notify resumes any coroutine that is watching s.
 //
-// One should only call this method in a [Task] function.
+// One must call this method in a [Task] function.
 func (s *Signal) Notify() {
 	if s.anyListeners() {
 		s.notify()
