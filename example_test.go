@@ -1135,6 +1135,50 @@ func ExampleGo() {
 	// Output:
 }
 
+func ExampleAfterContext() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	myExecutor.Spawn(async.Block(
+		async.AfterContext(ctx, &wg),
+		async.Do(func() { fmt.Println("after 100ms") }),
+	))
+
+	wg.Wait()
+
+	// Output:
+	// after 100ms
+}
+
+func ExampleAfterContext_cancel() {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(func() { wg.Go(myExecutor.Run) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	myExecutor.Spawn(async.Select(
+		async.Sleep(100*time.Millisecond, &wg), // Cancel the following task after 100ms.
+		async.Block(
+			async.AfterContext(ctx, &wg),
+			async.Do(func() { fmt.Println("after 200ms") }),
+		),
+	))
+
+	wg.Wait()
+
+	// Output:
+}
+
 // This example demonstrates how async handles panics.
 func Example_panicAndRecover() {
 	var wg sync.WaitGroup // For keeping track of goroutines.

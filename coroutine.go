@@ -1444,3 +1444,26 @@ func Sleep(d time.Duration, g GoroutineTracker) Task {
 		return co.Await(&sig).End()
 	}
 }
+
+// AfterContext returns a [Task] that awaits until ctx is canceled, and then
+// ends.
+func AfterContext(ctx context.Context, g GoroutineTracker) Task {
+	return func(co *Coroutine) Result {
+		var sig Signal
+		g.Add(1)
+		e, w := co.Executor(), co.Weight()
+		stop := context.AfterFunc(ctx, func() {
+			defer g.Done()
+			e.SpawnEx(w, func(co *Coroutine) Result {
+				sig.Notify()
+				return co.End()
+			})
+		})
+		co.CleanupFunc(func() {
+			if stop() {
+				g.Done()
+			}
+		})
+		return co.Await(&sig).End()
+	}
+}

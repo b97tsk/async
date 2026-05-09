@@ -103,3 +103,24 @@ func BenchmarkAsyncGoWithTimeAfter(b *testing.B) {
 
 	wg.Wait()
 }
+
+func BenchmarkAsyncAfterContext(b *testing.B) {
+	var wg sync.WaitGroup // For keeping track of goroutines.
+
+	var myExecutor async.Executor
+
+	myExecutor.Autorun(myExecutor.Run)
+
+	b.ReportAllocs()
+
+	sleep := func(d time.Duration) async.Task {
+		ctx, _ := context.WithTimeout(context.Background(), d)
+		return async.AfterContext(ctx, &wg)
+	}
+
+	for b.Loop() {
+		myExecutor.SpawnBlocking(sleep(0))
+	}
+
+	wg.Wait()
+}
