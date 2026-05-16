@@ -106,8 +106,8 @@
 //
 // Coroutine unwinding is the process of removing structure controllers,
 // such as [Func], from the controller stack.
-// Deferred tasks are run in last-in-first-out (LIFO) order, hence, the running
-// coroutine may still have a chance to yield during the process of unwinding.
+// Deferred tasks are run in last-in-first-out (LIFO) order, hence, an unwinding
+// coroutine may still have a chance to yield.
 //
 // Here is the list of operations that may cause a coroutine to unwind:
 //   - Returning: unstoppable, suspendable, [Func]-scoped;
