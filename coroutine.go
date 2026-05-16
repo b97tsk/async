@@ -429,8 +429,12 @@ func (co *Coroutine) clearDeps() {
 }
 
 func (co *Coroutine) clearChildren() bool {
-	ok := true
 	children := co.children
+	if len(children) == 0 {
+		return true
+	}
+	ok := true
+	co.children = nil
 	for child := range children {
 		child.flag |= flagCanceled
 		if child.flag&(flagSoftYield|flagHardYield) != flagHardYield {
@@ -444,6 +448,7 @@ func (co *Coroutine) clearChildren() bool {
 		}
 	}
 	clear(children)
+	co.children = children
 	return ok
 }
 
