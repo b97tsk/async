@@ -526,8 +526,10 @@ func (co *Coroutine) Watch(ev ...Event) {
 				co.deps = deps
 			}
 		}
-		deps[d] = struct{}{}
-		d.addListener(co)
+		if _, ok := deps[d]; !ok {
+			deps[d] = struct{}{}
+			d.addListener(co)
+		}
 	}
 }
 
