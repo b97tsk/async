@@ -297,9 +297,6 @@ func (co *Coroutine) run() status {
 					res = c.negotiate(co, co.panic())
 				}
 				if res.action != doTransition {
-					if !ps.Try(c.cleanup) {
-						res = co.panic()
-					}
 					controllers[i] = controller{}
 					controllers = controllers[:i]
 					co.controllers = controllers
@@ -966,19 +963,15 @@ func (c *controller) negotiate(co *Coroutine, res Result) Result {
 				return co.Transition(t)
 			}
 		}
+		if !co.ps.Try(c.stop) {
+			return co.panic()
+		}
 		return res
 	case ncController:
 		co.flag &^= flagHardYield | flagNonCancelable
 		return res
 	default:
 		panic("async: internal error: unknown controller")
-	}
-}
-
-func (c *controller) cleanup() {
-	switch c.kind {
-	case seqController:
-		c.stop()
 	}
 }
 
