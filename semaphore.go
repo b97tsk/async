@@ -98,7 +98,7 @@ func (s *Semaphore) cancel(w *waiter) {
 				s.notifyWaiters()
 			}
 		}
-	case w.co.Exiting():
+	case w.co.Exiting() && w.co.Canceled() && !w.co.NonCancelable():
 		s.cur -= w.n
 		s.notifyWaiters()
 	}
@@ -168,7 +168,7 @@ func (m *Mutex) cancel(w *waiter) {
 		if i := slices.Index(m.waiters, w); i != -1 {
 			m.waiters = slices.Delete(m.waiters, i, i+1)
 		}
-	case w.co.Exiting():
+	case w.co.Exiting() && w.co.Canceled() && !w.co.NonCancelable():
 		m.locked = false
 		m.notifyWaiters()
 	}

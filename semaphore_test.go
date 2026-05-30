@@ -7,6 +7,26 @@ import (
 )
 
 func TestSemaphore(t *testing.T) {
+	t.Run("AfterExit", func(t *testing.T) {
+		var myExecutor async.Executor
+
+		myExecutor.Autorun(myExecutor.Run)
+
+		sema := async.NewSemaphore(1)
+
+		myExecutor.Spawn(async.Select(
+			async.Func(async.Block(
+				async.Defer(async.NonCancelable(sema.Acquire(1))),
+				sema.Acquire(1),
+				async.Exit(),
+			)),
+			async.Do(func() { sema.Release(1) }),
+		))
+
+		if sema.TryAcquire(1) {
+			t.Fatal("Acquire after Exit did not succeed.")
+		}
+	})
 	t.Run("Cancelable", func(t *testing.T) {
 		var myExecutor async.Executor
 
@@ -56,6 +76,26 @@ func TestSemaphore(t *testing.T) {
 }
 
 func TestMutex(t *testing.T) {
+	t.Run("AfterExit", func(t *testing.T) {
+		var myExecutor async.Executor
+
+		myExecutor.Autorun(myExecutor.Run)
+
+		var mutex async.Mutex
+
+		myExecutor.Spawn(async.Select(
+			async.Func(async.Block(
+				async.Defer(async.NonCancelable(mutex.Lock())),
+				mutex.Lock(),
+				async.Exit(),
+			)),
+			async.Do(func() { mutex.Unlock() }),
+		))
+
+		if mutex.TryLock() {
+			t.Fatal("Lock after Exit did not succeed.")
+		}
+	})
 	t.Run("Cancelable", func(t *testing.T) {
 		var myExecutor async.Executor
 
@@ -72,7 +112,7 @@ func TestMutex(t *testing.T) {
 		))
 
 		if !mutex.TryLock() {
-			t.Fatal("TryUnlock did not succeed when there are no waiters.")
+			t.Fatal("TryLock did not succeed when there are no waiters.")
 		}
 	})
 	t.Run("Fairness", func(t *testing.T) {
