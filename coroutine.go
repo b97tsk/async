@@ -733,7 +733,7 @@ func (pr PendingResult) Exit() Result {
 }
 
 // Panic returns a [Result] that will cause the running coroutine to yield and,
-// when resumed, cause the running coroutine to behave like there's a panic.
+// when resumed, cause the running coroutine to behave as there's a panic.
 // Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
 func (pr PendingResult) Panic(v any) Result {
@@ -1083,14 +1083,16 @@ func Block(s ...Task) Task {
 	}
 }
 
-// Break returns a [Task] that breaks a [Loop] (or [LoopN]).
+// Break returns a [Task] that causes the coroutine that runs it to break
+// a [Loop] (or [LoopN]).
 func Break() Task {
 	return func(co *Coroutine) Result {
 		return co.Break()
 	}
 }
 
-// Continue returns a [Task] that continues a [Loop] (or [LoopN]).
+// Continue returns a [Task] that causes the coroutine that runs it to continue
+// a [Loop] (or [LoopN]).
 func Continue() Task {
 	return func(co *Coroutine) Result {
 		return co.Continue()
@@ -1159,7 +1161,8 @@ func Defer(t Task) Task {
 	}
 }
 
-// Return returns a [Task] that returns from a surrounding [Func].
+// Return returns a [Task] that causes the coroutine that runs it to return
+// from a surrounding [Func].
 func Return() Task {
 	return (*Coroutine).Return
 }
@@ -1171,7 +1174,7 @@ func Exit() Task {
 }
 
 // Panic returns a [Task] that causes the coroutine that runs it to behave
-// like there's a panic.
+// as there's a panic.
 // Unlike the built-in panic function, Panic leaves no stack trace behind.
 // Please use with caution.
 func Panic(v any) Task {
@@ -1202,9 +1205,8 @@ func Func(t Task) Task {
 
 // FromSeq returns a [Task] that runs each of the tasks from seq in sequence.
 //
-// Caveat: requires spawning a goroutine (which is stackful) when running
-// the returned task. The goroutine leaks, as well as the coroutine that runs
-// the returned task, if the returned task never ends.
+// FromSeq may spawn a goroutine to pull tasks from seq.
+// It must be canceled or run to completion to avoid leaking a goroutine behind.
 func FromSeq(seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
@@ -1221,6 +1223,12 @@ func FromSeq(seq iter.Seq[Task]) Task {
 //
 // For one-shot non-cancelable yields, one can use [HardAwait],
 // [Coroutine.HardAwait] or [Coroutine.HardYield].
+//
+// NonCancelable may change the behavior of a [Task].
+// It's a mistake to pass arbitrary tasks to NonCancelable.
+// For this reason, child coroutines and deferred tasks do not inherit this
+// property from a NonCancelable task (except, deferred tasks may inherit this
+// property from a non-cancelable [Func]).
 func NonCancelable(t Task) Task {
 	return func(co *Coroutine) Result {
 		res := co.Transition(t)
@@ -1261,8 +1269,8 @@ func resumeParent(co *Coroutine) Result {
 	return co.End()
 }
 
-// Join returns a [Task] that runs each of the given tasks in its own child
-// coroutine and awaits until all of them are completed, and then ends.
+// Join returns a [Task] that runs each of the given tasks in a child coroutine
+// and awaits until all of them are completed, and then ends.
 //
 // When passed no arguments, Join returns a [Task] that never ends.
 func Join(s ...Task) Task {
@@ -1284,8 +1292,8 @@ func Join(s ...Task) Task {
 	}
 }
 
-// Select returns a [Task] that runs each of the given tasks in its own
-// child coroutine and awaits until any of them completes, and then ends.
+// Select returns a [Task] that runs each of the given tasks in a child
+// coroutine and awaits until any of them completes, and then ends.
 // When Select ends, tasks other than the one that completes are canceled.
 //
 // When passed no arguments, Select returns a [Task] that never ends.
@@ -1323,15 +1331,14 @@ func Spawn(t Task) Task {
 	}
 }
 
-// MergeSeq returns a [Task] that runs each of the tasks from seq in its own
-// child coroutine concurrently until all of them are completed, and then ends.
+// MergeSeq returns a [Task] that runs each of the tasks from seq in a child
+// coroutine concurrently until all of them are completed, and then ends.
 // The argument concurrency specifies the maximum number of tasks that can
 // run at the same time. If it is zero, no tasks will be run and MergeSeq
 // never ends. It may wrap around. The maximum value of concurrency is -1.
 //
-// Caveat: requires spawning a goroutine (which is stackful) when running
-// the returned task. The goroutine leaks, as well as the coroutine that runs
-// the returned task, if the returned task never ends.
+// MergeSeq may spawn a goroutine to pull tasks from seq.
+// It must be canceled or run to completion to avoid leaking a goroutine behind.
 func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
 	return func(co *Coroutine) Result {
 		next, stop := iter.Pull(seq)
@@ -1363,6 +1370,7 @@ func MergeSeq(concurrency int, seq iter.Seq[Task]) Task {
 }
 
 // A GoroutineTracker is for keeping track of goroutines.
+// Implementation must be safe for concurrent use.
 //
 // A [sync.WaitGroup] would satisfy this interface.
 type GoroutineTracker interface {
@@ -1377,6 +1385,8 @@ type GoroutineTracker interface {
 // To cancel Go, f must return a [Task] that terminates Go, such as [Exit].
 // If f panics, Go propagates it.
 // Go completes only when everything is settled.
+//
+// Go must be canceled or run to completion to avoid leaking a goroutine behind.
 func Go(ctx context.Context, g GoroutineTracker, f func(ctx context.Context) Task) Task {
 	return func(co *Coroutine) Result {
 		ctx := ctx
@@ -1431,6 +1441,8 @@ func Go(ctx context.Context, g GoroutineTracker, f func(ctx context.Context) Tas
 
 // Sleep returns a [Task] that awaits until a period of time elapses, and then
 // ends.
+//
+// Sleep must be canceled or run to completion to prevent memory leak.
 func Sleep(d time.Duration, g GoroutineTracker) Task {
 	return func(co *Coroutine) Result {
 		var sig Signal
@@ -1451,6 +1463,8 @@ func Sleep(d time.Duration, g GoroutineTracker) Task {
 
 // AfterContext returns a [Task] that awaits until ctx is canceled, and then
 // ends.
+//
+// AfterContext must be canceled or run to completion to prevent memory leak.
 func AfterContext(ctx context.Context, g GoroutineTracker) Task {
 	return func(co *Coroutine) Result {
 		var sig Signal
